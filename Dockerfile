@@ -3,7 +3,6 @@ WORKDIR /app
 COPY ./api ./api
 COPY ./signer ./signer
 COPY ./core ./core
-COPY ./permissions ./permissions
 COPY ./Cargo.* .
 COPY ./Cargo.lock .
 RUN cargo build --release
