@@ -7,7 +7,7 @@ import Copy from "$lib/components/Copy.svelte";
 import Loader from "$lib/components/Loader.svelte";
 import Name from "$lib/components/Name.svelte";
 import PageSection from "$lib/components/PageSection.svelte";
-import { getCurrentUser } from "$lib/currentUser.svelte";
+import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
 import ndk from "$lib/ndk.svelte";
 import type {

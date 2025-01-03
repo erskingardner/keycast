@@ -1,5 +1,4 @@
-import { browser } from "$app/environment";
-import { NDKEvent, NDKKind, NDKNip07Signer } from "@nostr-dev-kit/ndk";
+import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import { getContext, setContext } from "svelte";
 import ndk from "./ndk.svelte";
 

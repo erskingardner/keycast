@@ -1,6 +1,6 @@
 <script lang="ts">
 import { page } from "$app/stores";
-import { getCurrentUser } from "$lib/currentUser.svelte";
+import { getCurrentUser } from "$lib/current_user.svelte";
 import ndk from "$lib/ndk.svelte";
 import { SigninMethod, signin, signout } from "$lib/utils/auth";
 import { Key, SignIn, SignOut } from "phosphor-svelte";

@@ -1,7 +1,7 @@
 <script lang="ts">
 import Loader from "$lib/components/Loader.svelte";
 import TeamCard from "$lib/components/TeamCard.svelte";
-import { getCurrentUser } from "$lib/currentUser.svelte";
+import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
 import ndk from "$lib/ndk.svelte.js";
 import type { TeamWithRelations } from "$lib/types";

@@ -2,6 +2,8 @@
 import { existsSync } from "fs";
 // biome-ignore lint/style/useNodejsImportProtocol: We're using Bun
 import { join } from "path";
+// biome-ignore lint/style/useNodejsImportProtocol: We're using Bun
+import { chmod } from "fs/promises";
 
 class FileKeyManager {
     async generateMasterKey(): Promise<void> {
@@ -18,6 +20,9 @@ class FileKeyManager {
 
             // Write the key to file using Bun's file API
             await Bun.write(keyPath, encoded);
+            
+            // Set file permissions to 600 (read/write for owner only)
+            await chmod(keyPath, 0o600);
             
             console.log(`Saved new master key to ${keyPath}`);
         } catch (error) {

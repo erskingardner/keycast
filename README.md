@@ -66,17 +66,18 @@ Each request for one of the matching methods (`sign_event`, `nip04_encrypt`, `ni
 
 To make your custom permission usable in the app, you'll also need to reference it in three places:
 1. The `AVAILABLE_PERMISSIONS` array in `web/src/lib/types.ts`
-2. The `AVAILABLE_PERMISSIONS` array in `core/src/custom_permissions/mod.rs`
-3. The `to_custom_permission` method in `core/src/types/permission.rs`
+1. The `AVAILABLE_PERMISSIONS` array in `core/src/custom_permissions/mod.rs`
+1. The `to_custom_permission` method in `core/src/types/permission.rs`
 
 ## Deployment
 
 To start, we support Docker. 
 
 1. First, ssh into your VM or server where you'll want to run Keycast. 
-2. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
-3. Build the docker image with `docker compose build`
-4. Run the docker container with `docker compose up` or `docker compose up -d` to run in detached mode.
+1. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
+1. You need to generate a master encryption key. This is done with `bun run key:generate`. This key is a file based key that is used to encrypt and decrypt Nostr private keys in the database. In the future we'll support other key storage methods like AWS KMS.
+1. Build the docker image with `docker compose build`
+1. Run the docker container with `docker compose up` or `docker compose up -d` to run in detached mode.
 
 ## License
 

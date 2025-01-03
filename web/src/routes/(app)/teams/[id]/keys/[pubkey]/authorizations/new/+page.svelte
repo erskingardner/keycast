@@ -2,7 +2,7 @@
 import { goto } from "$app/navigation";
 import { page } from "$app/stores";
 import PageSection from "$lib/components/PageSection.svelte";
-import { getCurrentUser } from "$lib/currentUser.svelte";
+import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
 import ndk from "$lib/ndk.svelte";
 import type {

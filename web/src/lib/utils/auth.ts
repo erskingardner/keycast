@@ -1,6 +1,6 @@
 import { browser } from "$app/environment";
 import { goto } from "$app/navigation";
-import { getCurrentUser, setCurrentUser } from "$lib/currentUser.svelte";
+import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
 import type NDK from "@nostr-dev-kit/ndk";
 import {
     NDKNip07Signer,

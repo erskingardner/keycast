@@ -13,8 +13,8 @@
 		"build:web": "cd web && bun run build --production",
 		"build:signer": "cd signer && cargo build --release",
 		"db:reset": "sqlx database reset --database-url sqlite:./database/keycast.db --source ./database/migrations",
-		"key:generate": "bun run scripts/generateKey.ts",
-		"key:generate:force": "bun run scripts/generateKey.ts --force"
+		"key:generate": "bun run scripts/generate_key.ts",
+		"key:generate:force": "bun run scripts/generate_key.ts --force"
 	},
 	"devDependencies": {
 		"concurrently": "^9.1.1"

@@ -20,8 +20,8 @@
 ## Core
 
 ## Signer
-- [ ] Run signer as separate process (that is run by concurrently as well)
-- [ ] Finish permissions loop for approval
+- [X] Run signer as separate process (that is run by concurrently as well)
+- [X] Finish permissions loop for approval
 
 ## Config
 - [X] Make sure we reationalize config across all crates
