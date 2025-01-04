@@ -6,17 +6,49 @@ services:
       - "3000:3000"  # API
     volumes:
       - ./database:/app/database  # For SQLite database persistence
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
   caddy:
       image: caddy:2
       ports:
         - "80:80"
         - "443:443"
       volumes:
-        - ./Caddyfile:/etc/caddy/Caddyfile
+        - ./Caddyfile:/etc/caddy/Caddyfile:ro
         - caddy_data:/data
         - caddy_config:/config
       depends_on:
-        - app
+        app:
+          condition: service_healthy
+      restart: unless-stopped
+      healthcheck:
+        test: ["CMD", "caddy", "version"]
+        interval: 30s
+        timeout: 10s
+        retries: 3
+      logging:
+        driver: "json-file"
+        options:
+          max-size: "10m"
+          max-file: "3"
+
 volumes:
   caddy_data:
   caddy_config:
+
+networks:
+  default:
+    name: app_network

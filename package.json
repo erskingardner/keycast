@@ -10,7 +10,7 @@
 		"dev:signer": "cargo build --bin signer_daemon && RUST_LOG=warn,keycast_signer=debug cargo watch -x \"run --bin keycast_signer\"",
 		"build": "concurrently -n 'rust,web,signer' -c 'blue,green,yellow' \"bun run build:api\" \"bun run build:web\" \"bun run build:signer\"",
 		"build:api": "cd api && cargo build --release",
-		"build:web": "cd web && bun run build --production",
+		"build:web": "cd web && bun run build",
 		"build:signer": "cd signer && cargo build --release",
 		"db:reset": "sqlx database reset --database-url sqlite:./database/keycast.db --source ./database/migrations",
 		"key:generate": "bun run scripts/generate_key.ts",

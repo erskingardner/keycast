@@ -10,7 +10,7 @@ class FileKeyManager {
         try {
             // Generate 32 random bytes using Bun's crypto API
             const key = crypto.getRandomValues(new Uint8Array(32));
-            
+
             // Convert to base64
             const encoded = btoa(String.fromCharCode(...key));
 
@@ -20,10 +20,10 @@ class FileKeyManager {
 
             // Write the key to file using Bun's file API
             await Bun.write(keyPath, encoded);
-            
+
             // Set file permissions to 600 (read/write for owner only)
             await chmod(keyPath, 0o600);
-            
+
             console.log(`Saved new master key to ${keyPath}`);
         } catch (error) {
             throw new Error(`Failed to generate master key: ${error.message}`);

@@ -1,6 +1,8 @@
 use super::auth_middleware;
-use axum::middleware;
 use axum::{
+    http::StatusCode,
+    middleware,
+    response::IntoResponse,
     routing::{delete, get, post, put},
     Router,
 };
@@ -10,6 +12,7 @@ use crate::api::http::teams;
 
 pub fn routes(pool: SqlitePool) -> Router {
     Router::new()
+        .route("/health", get(health_check))
         .route("/teams", get(teams::list_teams))
         .route("/teams", post(teams::create_team))
         .route("/teams/:id", get(teams::get_team))
@@ -30,4 +33,8 @@ pub fn routes(pool: SqlitePool) -> Router {
         .route("/teams/:id/policies", post(teams::add_policy))
         .layer(middleware::from_fn(auth_middleware))
         .with_state(pool)
+}
+
+pub async fn health_check() -> impl IntoResponse {
+    StatusCode::OK
 }
