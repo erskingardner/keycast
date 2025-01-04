@@ -10,8 +10,7 @@ RUN cargo build --release
 
 # Build stage for Bun frontend
 FROM oven/bun:1 AS web-builder
-ENV NODE_OPTIONS="--max-old-space-size=2048"
-ENV BUN_MEMORY_LIMIT=2048
+ENV NODE_OPTIONS="--max-old-space-size=1536"
 WORKDIR /app
 COPY ./web .
 COPY ./scripts ./scripts
@@ -26,7 +25,7 @@ RUN if [ -f ../master.key ]; then \
 
 # Install dependencies and build
 RUN bun install
-RUN bun run build
+RUN bun --smol run build
 
 # Install production dependencies only
 RUN bun install --production

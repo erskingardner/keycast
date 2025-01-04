@@ -80,6 +80,14 @@ To start, we support Docker.
 1. Build the docker image with `sudo docker compose build`
 1. Run the docker container with `sudo docker compose up` or `sudo docker compose up -d` to run in detached mode.
 
+### VM requirements
+
+The running app requires very little resources but in order to build the docker images you'll need at least 2GB of RAM (usually helps to have some swap space set up as well). If you're seeing the following errors when building, try to increase the swap space on your VM or use a larger VM.
+
+`failed to solve: process "/bin/sh -c bun run build" did not complete successfully: exit code: 137`
+
+### Reverse proxy
+
 There is also a `Caddyfile` that will attempt to setup a reverse proxy on your server. If you want to use this, you'll need to have a domain name and update the caddyfile with your domain name.
 
 ## License
