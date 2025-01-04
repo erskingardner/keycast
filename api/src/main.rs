@@ -2,7 +2,12 @@ mod api;
 mod state;
 
 use crate::state::{get_db_pool, KeycastState, KEYCAST_STATE};
-use axum::{http::HeaderValue, Router};
+use axum::{
+    http::{HeaderValue, StatusCode},
+    response::IntoResponse,
+    routing::get,
+    Router,
+};
 use keycast_core::database::Database;
 use keycast_core::encryption::file_key_manager::FileKeyManager;
 use std::env;
@@ -81,6 +86,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .allow_headers(Any);
 
     let app = Router::new()
+        .route("/health", get(health_check))
         .nest("/api", api::http::routes(get_db_pool().unwrap().clone()))
         .layer(TraceLayer::new_for_http())
         .layer(cors);
@@ -93,4 +99,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     axum::serve(listener, app).await.unwrap();
 
     Ok(())
+}
+
+async fn health_check() -> impl IntoResponse {
+    StatusCode::OK
 }

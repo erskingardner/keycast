@@ -1,25 +1,43 @@
 services:
-  app:
+  api:
     build: .
+    command: api
     ports:
-      - "5173:5173"  # SvelteKit
-      - "3000:3000"  # API
+      - "3000:3000"
     volumes:
-      - ./database:/app/database  # For SQLite database persistence
+      - ./database:/app/database
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
-      interval: 30s
-      timeout: 10s
+      test: ["CMD", "/usr/local/bin/healthcheck.sh", "api"]
+      interval: 10s
+      timeout: 5s
       retries: 3
-      start_period: 40s
+      start_period: 10s
     restart: unless-stopped
+    networks:
+      - app_network
+
+  web:
+    build: .
+    command: web
+    ports:
+      - "5173:5173"
+    depends_on:
+      api:
+        condition: service_healthy
     environment:
       - NODE_ENV=production
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+      - WAIT_FOR_API=true
+      - HOST=0.0.0.0
+      - PORT=5173
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh", "web"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - app_network
 
   caddy:
       image: caddy:2
@@ -31,7 +49,9 @@ services:
         - caddy_data:/data
         - caddy_config:/config
       depends_on:
-        app:
+        api:
+          condition: service_healthy
+        web:
           condition: service_healthy
       restart: unless-stopped
       healthcheck:
@@ -44,11 +64,13 @@ services:
         options:
           max-size: "10m"
           max-file: "3"
+      networks:
+        - app_network
 
 volumes:
   caddy_data:
   caddy_config:
 
 networks:
-  default:
-    name: app_network
+  app_network:
+    driver: bridge

@@ -12,8 +12,22 @@ RUN cargo build --release
 FROM oven/bun:1 AS web-builder
 WORKDIR /app
 COPY ./web .
+COPY ./scripts ./scripts
+
+# Check/generate master.key before building
+RUN if [ -f ../master.key ]; then \
+    cp ../master.key .; \
+    else \
+    echo "No master.key found, will generate one"; \
+    bun run scripts/generate_key.ts; \
+    fi
+
+# Install dependencies and build
 RUN bun install
 RUN bun run build
+
+# Install production dependencies only
+RUN bun install --production
 
 # Final stage
 FROM debian:bookworm-slim
@@ -21,12 +35,13 @@ WORKDIR /app
 
 # Install dependencies in a single layer and cleanup
 RUN apt-get update && apt-get install -y \
-    supervisor \
     sqlite3 \
     curl \
     zip \
     unzip \
     ca-certificates \
+    netcat-traditional \
+    iproute2 \
     && rm -rf /var/lib/apt/lists/* \
     && curl -fsSL https://bun.sh/install | bash
 
@@ -35,25 +50,29 @@ RUN mkdir -p /app/database
 
 # Copy built artifacts
 COPY --from=rust-builder /app/target/release/keycast_* ./
-COPY --from=web-builder /app/.svelte-kit/output ./web
-COPY supervisord.conf /etc/supervisor/conf.d/supervisord.conf
-
-# Generate master.key if it doesn't exist
-RUN if [ ! -f "./master.key" ]; then \
-    echo "Generating new master key..." && \
-    /root/.bun/bin/bun run key:generate; \
-    fi
+COPY --from=web-builder /app/master.key ./
+COPY --from=web-builder /app/build ./web
+COPY --from=web-builder /app/package.json ./
+COPY --from=web-builder /app/node_modules ./node_modules
 
 # Set environment variables
 ENV NODE_ENV=production \
-    BUN_ENV=production
+    BUN_ENV=production \
+    PATH=/root/.bun/bin:$PATH
 
 # Expose ports
 EXPOSE 3000 5173
 
-# Add healthcheck
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:3000/health || exit 1
+# Add a health check script
+COPY scripts/healthcheck.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/healthcheck.sh
 
-# Use supervisor to manage processes
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/conf.d/supervisord.conf"]
+# Add an entrypoint script
+COPY scripts/docker-entrypoint.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
+    CMD ["/usr/local/bin/healthcheck.sh"]
+
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["api"]
