@@ -10,6 +10,8 @@ RUN cargo build --release
 
 # Build stage for Bun frontend
 FROM oven/bun:1 AS web-builder
+ENV NODE_OPTIONS="--max-old-space-size=2048"
+ENV BUN_MEMORY_LIMIT=2048
 WORKDIR /app
 COPY ./web .
 COPY ./scripts ./scripts
