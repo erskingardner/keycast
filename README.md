@@ -75,7 +75,7 @@ To start, we support Docker.
 
 1. ssh into your VM or server where you'll want to run Keycast.
 1. Install docker following the instructions for your OS here: https://docs.docker.com/engine/install
-1. Install docker compose (if using Linux use the standalone install): https://docs.docker.com/compose/install/standalone/
+1. Ensure you have docker compose: https://docs.docker.com/compose/install
 1. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
 1. Build the docker image with `sudo docker compose build`
 1. Run the docker container with `sudo docker compose up` or `sudo docker compose up -d` to run in detached mode.

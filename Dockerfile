@@ -1,5 +1,5 @@
 # Build stage for Rust API
-FROM rustlang/rust:nightly AS rust-builder
+FROM rustlang/rust:nightly-slim AS rust-builder
 WORKDIR /app
 COPY ./api ./api
 COPY ./signer ./signer
@@ -9,7 +9,7 @@ COPY ./Cargo.lock .
 RUN cargo build --release
 
 # Build stage for Bun frontend
-FROM oven/bun:1 AS web-builder
+FROM oven/bun:1-slim AS web-builder
 ENV NODE_OPTIONS="--max-old-space-size=1536"
 WORKDIR /app
 COPY ./web .
@@ -31,20 +31,17 @@ RUN bun --smol run build
 RUN bun install --production
 
 # Final stage
-FROM debian:bookworm-slim
+FROM alpine:3.19 AS runtime
 WORKDIR /app
 
-# Install dependencies in a single layer and cleanup
-RUN apt-get update && apt-get install -y \
-    sqlite3 \
-    curl \
-    zip \
-    unzip \
+# Install only the essential runtime dependencies
+RUN apk add --no-cache \
+    sqlite \
     ca-certificates \
-    netcat-traditional \
-    iproute2 \
-    && rm -rf /var/lib/apt/lists/* \
-    && curl -fsSL https://bun.sh/install | bash
+    netcat-openbsd \
+    bash
+
+RUN curl -fsSL https://bun.sh/install | bash
 
 # Create necessary directories
 RUN mkdir -p /app/database
