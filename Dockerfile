@@ -39,7 +39,8 @@ RUN apk add --no-cache \
     sqlite \
     ca-certificates \
     netcat-openbsd \
-    bash
+    bash \
+    curl
 
 RUN curl -fsSL https://bun.sh/install | bash
 
