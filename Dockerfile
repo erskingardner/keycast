@@ -31,16 +31,20 @@ RUN bun --smol run build
 RUN bun install --production
 
 # Final stage
-FROM alpine:3.19 AS runtime
+FROM debian:stable-slim AS runtime
 WORKDIR /app
 
 # Install only the essential runtime dependencies
-RUN apk add --no-cache \
-    sqlite \
+RUN apt-get update && apt-get install -y \
+    sqlite3 \
     ca-certificates \
     netcat-openbsd \
     bash \
-    curl
+    curl \
+    unzip \
+    iproute2 \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 RUN curl -fsSL https://bun.sh/install | bash
 
