@@ -1,4 +1,4 @@
 yourdomain.com {
-    reverse_proxy /api/* app:3000
-    reverse_proxy * app:5173
+    reverse_proxy /api/* api:3000
+    reverse_proxy * web:5173
 }
