@@ -11,6 +11,10 @@ RUN cargo build --release
 # Build stage for Bun frontend
 FROM oven/bun:1-slim AS web-builder
 ENV NODE_OPTIONS="--max-old-space-size=1536"
+ENV CI=true
+ENV NODE_ENV=production
+ENV VITE_BUILD_MODE=production
+ENV PATH=/app/node_modules/.bin:$PATH
 WORKDIR /app
 COPY ./web .
 COPY ./scripts ./scripts
@@ -25,10 +29,15 @@ RUN if [ -f ../master.key ]; then \
 
 # Install dependencies and build
 RUN bun install
-RUN bun --smol run build
 
-# Install production dependencies only
-RUN bun install --production
+# Install ARM64-specific dependencies only on ARM64 architecture
+RUN if [ "$(uname -m)" = "aarch64" ]; then \
+    bun add -d @rollup/rollup-linux-arm64-gnu; \
+    fi
+
+# Add these lines to prepare the SvelteKit build
+RUN bunx svelte-kit sync
+RUN bunx --bun vite build --no-watch --mode production
 
 # Final stage
 FROM debian:stable-slim AS runtime
@@ -46,13 +55,15 @@ RUN apt-get update && apt-get install -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Bun for use in the entrypoint script
 RUN curl -fsSL https://bun.sh/install | bash
 
 # Create necessary directories
 RUN mkdir -p /app/database
 
-# Copy built artifacts
-COPY --from=rust-builder /app/target/release/keycast_* ./
+# Copy built artifacts (be more specific with the binary names)
+COPY --from=rust-builder /app/target/release/keycast_api ./
+COPY --from=rust-builder /app/target/release/keycast_signer ./
 COPY --from=web-builder /app/master.key ./
 COPY --from=web-builder /app/build ./web
 COPY --from=web-builder /app/package.json ./

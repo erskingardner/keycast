@@ -31,9 +31,9 @@ elif [ "$1" = "web" ]; then
         echo "Network status:"
         ip addr
         echo "DNS resolution:"
-        getent hosts api || echo "Could not resolve api hostname"
+        getent hosts keycast-api || echo "Could not resolve keycast-api hostname"
         echo "Attempting to reach API..."
-        wait_for_port api 3000
+        wait_for_port keycast-api 3000
     fi
     echo "Starting web server..."
     exec bun web/index.js

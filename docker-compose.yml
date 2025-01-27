@@ -1,5 +1,6 @@
 services:
-  api:
+  keycast-api:
+    container_name: keycast-api
     build: .
     command: api
     ports:
@@ -14,21 +15,32 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - app_network
+      - keycast
+    labels:
+      - "caddy=your-domain.com"
+      - "caddy.reverse_proxy=/api/* {{upstreams 3000}}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
 
-  web:
+  keycast-web:
+    container_name: keycast-web
     build: .
     command: web
-    ports:
-      - "5173:5173"
+    expose:
+      - "5173"
     depends_on:
-      api:
+      keycast-api:
         condition: service_healthy
     environment:
       - NODE_ENV=production
       - WAIT_FOR_API=true
       - HOST=0.0.0.0
       - PORT=5173
+      - VITE_API_DOMAIN=http://keycast-api:3000/api
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "web"]
       interval: 10s
@@ -37,40 +49,18 @@ services:
       start_period: 10s
     restart: unless-stopped
     networks:
-      - app_network
-
-  caddy:
-      image: caddy:2
-      ports:
-        - "80:80"
-        - "443:443"
-      volumes:
-        - ./Caddyfile:/etc/caddy/Caddyfile:ro
-        - caddy_data:/data
-        - caddy_config:/config
-      depends_on:
-        api:
-          condition: service_healthy
-        web:
-          condition: service_healthy
-      restart: unless-stopped
-      healthcheck:
-        test: ["CMD", "caddy", "version"]
-        interval: 30s
-        timeout: 10s
-        retries: 3
-      logging:
-        driver: "json-file"
-        options:
-          max-size: "10m"
-          max-file: "3"
-      networks:
-        - app_network
-
-volumes:
-  caddy_data:
-  caddy_config:
+      - keycast
+    labels:
+      - "caddy=your-domain.com"
+      - "caddy.reverse_proxy=/* {{upstreams 5173}}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
 
 networks:
-  app_network:
-    driver: bridge
+  keycast:
+    external: true
+    name: keycast

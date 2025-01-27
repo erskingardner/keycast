@@ -71,12 +71,12 @@ To make your custom permission usable in the app, you'll also need to reference 
 
 ## Deployment
 
-To start, we support Docker. 
+To start, we support Docker.
 
 1. ssh into your VM or server where you'll want to run Keycast.
 1. Install docker following the instructions for your OS here: https://docs.docker.com/engine/install
-1. Ensure you have docker compose: https://docs.docker.com/compose/install
 1. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
+1. Update the domain names in the [`docker-compose.yml`](./docker-compose.yml) file and [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file if you're going to use the caddy reverse proxy.
 1. Build the docker image with `sudo docker compose build`
 1. Run the docker container with `sudo docker compose up` or `sudo docker compose up -d` to run in detached mode.
 
@@ -88,7 +88,9 @@ The running app requires very little resources but in order to build the docker 
 
 ### Reverse proxy
 
-There is also a `Caddyfile` that will attempt to setup a reverse proxy on your server. If you want to use this, you'll need to have a domain name and update the caddyfile with your domain name.
+The included [`docker-compose.yml`](./docker-compose.yml) file will attempt to setup a reverse proxy on your server. If you want to use this, you'll need to have a domain name and update the caddyfile with your domain name.
+
+This also reqiures that your service is running a caddy proxy container. The included [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file can be used to start a caddy proxy container and link it to the keycast network.
 
 ## License
 

@@ -1,0 +1,26 @@
+services:
+  caddy:
+    image: lucaslorentz/caddy-docker-proxy:ci-alpine
+    ports:
+      - 80:80
+      - 443:443
+    environment:
+      - CADDY_INGRESS_NETWORKS=keycast,strfry
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - caddy_data:/data
+    networks:
+      - keycast
+    restart: unless-stopped
+
+networks:
+  keycast:
+    external: true
+    name: keycast
+  strfry:
+    external: true
+    name: strfry
+
+volumes:
+  caddy_data:
+
