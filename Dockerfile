@@ -9,12 +9,13 @@ COPY ./Cargo.lock .
 RUN cargo build --release
 
 # Build stage for Bun frontend
-FROM oven/bun:1-slim AS web-builder
-ENV NODE_OPTIONS="--max-old-space-size=1536"
+FROM oven/bun:latest AS web-builder
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 ENV CI=true
 ENV NODE_ENV=production
 ENV VITE_BUILD_MODE=production
 ENV PATH=/app/node_modules/.bin:$PATH
+ENV VITE_DISABLE_CHUNK_SPLITTING=true
 WORKDIR /app
 COPY ./web .
 COPY ./scripts ./scripts
@@ -35,12 +36,12 @@ RUN if [ "$(uname -m)" = "aarch64" ]; then \
     bun add -d @rollup/rollup-linux-arm64-gnu; \
     fi
 
-# Add these lines to prepare the SvelteKit build
-RUN bunx svelte-kit sync
-RUN bunx --bun vite build --no-watch --mode production
+# Check and Build
+RUN bun run check
+RUN bun run build
 
 # Final stage
-FROM debian:stable-slim AS runtime
+FROM debian:bookworm-slim AS runtime
 WORKDIR /app
 
 # Install only the essential runtime dependencies

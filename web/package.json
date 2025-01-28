@@ -28,7 +28,7 @@
 		"@nostr-dev-kit/ndk-cache-dexie": "^2.5.9",
 		"@tailwindcss/forms": "^0.5.10",
 		"@tailwindcss/typography": "^0.5.16",
-		"nostr-login": "^1.7.4",
+		"nostr-login": "1.6.6",
 		"phosphor-svelte": "^3.0.1",
 		"tippy.js": "^6.3.7"
 	}
