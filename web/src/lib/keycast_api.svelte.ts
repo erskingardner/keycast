@@ -1,13 +1,14 @@
-import { PUBLIC_DOMAIN } from "$env/static/public";
 import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import { getContext, setContext } from "svelte";
 import ndk from "./ndk.svelte";
+
 export class KeycastApi {
     private baseUrl: string;
     private defaultHeaders: HeadersInit;
 
     constructor() {
-        const apiDomain = PUBLIC_DOMAIN || "http://localhost:3000";
+        const apiDomain =
+            import.meta.env.VITE_DOMAIN || "http://localhost:3000";
         this.baseUrl = `${apiDomain}/api`;
         this.defaultHeaders = {
             "Content-Type": "application/json",

@@ -69,15 +69,15 @@ onMount(() => {
 	.blob {
 		@apply absolute rounded-full mix-blend-multiply filter blur-3xl animate-blob;
 	}
-    
+
     .animate-blob {
         animation: blob 14s infinite;
     }
-    
+
     .animation-delay-2000 {
         animation-delay: 2s;
     }
-    
+
     .animation-delay-5500 {
         animation-delay: 5.5s;
     }

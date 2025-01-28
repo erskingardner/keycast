@@ -173,7 +173,7 @@ async function createAuthorization() {
                 <div class="card-grid">
                     {#each policies as policy}
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
-                        <div 
+                        <div
                             class="card hover-card {selectedPolicyId === policy.policy.id ? '!ring-2 !ring-indigo-500' : ''}"
                             onclick={() => selectedPolicyId = policy.policy.id}
                             role="button"

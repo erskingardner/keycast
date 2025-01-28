@@ -76,6 +76,6 @@ async function createKey() {
         <label for="secretKey">Private key (nsec or hex)</label>
         <input type="password" placeholder="nsec1..." bind:value={secretKey} />
     </div>
-    
+
     <button type="submit" class="button button-primary">Securely Add Key</button>
 </form>

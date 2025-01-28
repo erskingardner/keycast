@@ -110,6 +110,6 @@ async function addPermission() {
         <PermissionForm bind:identifier bind:config />
         <button onclick={addPermission} class="button button-secondary self-start mt-6 mb-6">Add permission</button>
     </PageSection>
-    
+
     <button onclick={createPolicy} class="button button-primary self-start">Save Policy</button>
 </form>
