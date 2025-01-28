@@ -25,6 +25,8 @@ ENV NODE_ENV=production
 ENV VITE_BUILD_MODE=production
 ENV PATH=/app/node_modules/.bin:$PATH
 ENV VITE_DISABLE_CHUNK_SPLITTING=true
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
 
 WORKDIR /app
 COPY ./web .
