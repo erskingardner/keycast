@@ -76,9 +76,11 @@ To start, we support Docker.
 1. ssh into your VM or server where you'll want to run Keycast.
 1. Install docker following the instructions for your OS here: https://docs.docker.com/engine/install
 1. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
-1. Update the domain names in the [`docker-compose.yml`](./docker-compose.yml) file and [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file if you're going to use the caddy reverse proxy.
-1. Build the docker image with `sudo docker compose build`
-1. Run the docker container with `sudo docker compose up` or `sudo docker compose up -d` to run in detached mode.
+1. There are two things you need to update:
+  1. Set the domain name in the [`docker-compose.yml`](./docker-compose.yml) file.
+  1. Run `cp /web/.env.sample /web/.env` and update the `PUBLIC_DOMAIN` variable with your domain name.
+  1. (Optional) If you're going to use the caddy reverse proxy, you'll need to update the domain names in the [`docker-compose.yml`](./docker-compose.yml) file and [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file.
+1. Build and run the docker image with `sudo docker compose up -d --build`.
 
 ### VM requirements
 

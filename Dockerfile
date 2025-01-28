@@ -15,7 +15,7 @@ ENV CI=true
 ENV NODE_ENV=production
 ENV VITE_BUILD_MODE=production
 ENV PATH=/app/node_modules/.bin:$PATH
-ENV VITE_DISABLE_CHUNK_SPLITTING=true
+
 WORKDIR /app
 COPY ./web .
 COPY ./scripts ./scripts

@@ -1,3 +1,5 @@
+x-domain: &domain "your-domain.com"
+
 services:
   keycast-api:
     container_name: keycast-api
@@ -17,7 +19,7 @@ services:
     networks:
       - keycast
     labels:
-      - "caddy=your-domain.com"
+      - "caddy=*domain"
       - "caddy.reverse_proxy=/api/* {{upstreams 3000}}"
     logging:
       driver: "json-file"
@@ -28,7 +30,8 @@ services:
 
   keycast-web:
     container_name: keycast-web
-    build: .
+    build:
+      context: .
     command: web
     expose:
       - "5173"
@@ -40,7 +43,6 @@ services:
       - WAIT_FOR_API=true
       - HOST=0.0.0.0
       - PORT=5173
-      - VITE_API_DOMAIN=http://keycast-api:3000/api
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "web"]
       interval: 10s
@@ -51,7 +53,7 @@ services:
     networks:
       - keycast
     labels:
-      - "caddy=your-domain.com"
+      - "caddy=*domain"
       - "caddy.reverse_proxy=/* {{upstreams 5173}}"
     logging:
       driver: "json-file"

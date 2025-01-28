@@ -25,6 +25,9 @@ let inlineTeamNameInput: HTMLInputElement | null = $state(null);
 let inlineTeamError: string | null = $state(null);
 let inlineTeamName = $state("");
 
+const apiDomain = import.meta.env.VITE_API_DOMAIN;
+console.log(apiDomain);
+
 $effect(() => {
     if (user?.pubkey && !unsignedAuthEvent) {
         api.buildUnsignedAuthEvent("/teams", "GET", user.pubkey).then(
