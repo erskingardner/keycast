@@ -9,12 +9,22 @@ COPY ./Cargo.lock .
 RUN cargo build --release
 
 # Build stage for Bun frontend
-FROM oven/bun:latest AS web-builder
+FROM oven/bun:1 AS web-builder
+
+# Install build essentials for native modules
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python-is-python3 \
+    make \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 ENV CI=true
 ENV NODE_ENV=production
 ENV VITE_BUILD_MODE=production
 ENV PATH=/app/node_modules/.bin:$PATH
+ENV VITE_DISABLE_CHUNK_SPLITTING=true
 
 WORKDIR /app
 COPY ./web .
