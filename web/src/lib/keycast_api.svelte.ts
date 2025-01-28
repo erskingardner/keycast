@@ -6,8 +6,9 @@ export class KeycastApi {
     private defaultHeaders: HeadersInit;
 
     constructor() {
+        // should've been a sculptor instead
         const apiDomain =
-            import.meta.env.VITE_API_DOMAIN || "http://localhost:3000";
+            import.meta.env.VITE_API_DOMAIN || '__VITE_API_DOMAIN__' || "http://localhost:3000";
         this.baseUrl = `${apiDomain}/api`;
         this.defaultHeaders = {
             "Content-Type": "application/json",
