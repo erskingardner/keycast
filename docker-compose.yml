@@ -32,6 +32,7 @@ services:
       context: .
       args:
         - VITE_DOMAIN=${DOMAIN:?error}
+        - VITE_ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS}
     command: web
     expose:
       - "5173"
@@ -44,6 +45,7 @@ services:
       - HOST=0.0.0.0
       - PORT=5173
       - "VITE_DOMAIN=${DOMAIN:?error}"
+      - "VITE_ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS}"
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "web"]
       interval: 10s

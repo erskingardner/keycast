@@ -21,7 +21,8 @@ RUN apt-get update && apt-get install -y \
 
 ARG VITE_DOMAIN
 ENV VITE_DOMAIN=$VITE_DOMAIN
-RUN echo "Domain is set to: ${VITE_DOMAIN}"
+ARG VITE_ALLOWED_PUBKEYS
+ENV VITE_ALLOWED_PUBKEYS=$VITE_ALLOWED_PUBKEYS
 
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 ENV CI=true

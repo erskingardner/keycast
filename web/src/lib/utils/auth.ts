@@ -17,6 +17,12 @@ export enum SigninMethod {
     // PK = "pk",
 }
 
+function isAllowedPubkey(pubkey: string) {
+    return JSON.stringify(import.meta.env.VITE_ALLOWED_PUBKEYS).includes(
+        pubkey,
+    );
+}
+
 /**
  * Attempt to signin with the same method that was previously used, or default to NIP-07 extension
  */
@@ -33,6 +39,10 @@ export async function signin(
         signedInUser = await userFromNip07(ndk);
     }
     if (signedInUser) {
+        if (!isAllowedPubkey(signedInUser.pubkey)) {
+            toast.error("Your pubkey is not authorized");
+            return null;
+        }
         signedInUser.ndk = ndk;
         ndk.activeUser = signedInUser;
         const alreadySignedIn = !!getCurrentUser();
