@@ -19,6 +19,10 @@ RUN apt-get update && apt-get install -y \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
+ARG VITE_DOMAIN
+ENV VITE_DOMAIN=$VITE_DOMAIN
+RUN echo "Domain is set to: ${VITE_DOMAIN}"
+
 ENV NODE_OPTIONS="--max-old-space-size=2048"
 ENV CI=true
 ENV NODE_ENV=production

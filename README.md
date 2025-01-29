@@ -45,9 +45,8 @@ The `web` subdirectory contains a SvelteKit app that uses Bun for bundling and T
 ### Getting Started
 
 1. Clone the repository and install workspace dependencies with `bun install`
-2. Install the web app dependencies with `cd web && bun install`
-3. Config is done with `config.toml` files. You shouldn't have to change anything to get started. The only setting that has any config at the moment is the signing daemon process health check interval. In the future, database location settings will be added here.
-4. Then, from the root directory, generate a master encryption key with `bun run key:generate`. This master key is used to encrypt and decrypt Nostr private keys in the database. These are only decrypted when used and remain encrypted at rest. In the future we hope to support other key storage methods, like AWS KMS.
+1. Install the web app dependencies with `cd web && bun install`
+1. Then, from the root directory, generate a master encryption key with `bun run key:generate`. This master key is used to encrypt and decrypt Nostr private keys in the database. These are only decrypted when used and remain encrypted at rest. In the future we hope to support other key storage methods, like AWS KMS.
 
 ### Running the dev server (API + Web + Signer)
 1. You can now run the dev server with `bun run dev`. We use `concurrently` to run the API and web app in parallel. You'll see the web app start up at `https://localhost:5173` and the API will start up at `http://localhost:3000`. Both apps will output logs to the console and will hotreload on code changes. The signer will also start up and will spawn signing processes for each of your authentications. The signing manager will keep an eye on the authentications and pick up new ones as they come in or remove them if they are removed from the database. It will also attempt to restart signing processes if they crash.
@@ -69,17 +68,13 @@ To make your custom permission usable in the app, you'll also need to reference 
 1. The `AVAILABLE_PERMISSIONS` array in `core/src/custom_permissions/mod.rs`
 1. The `to_custom_permission` method in `core/src/types/permission.rs`
 
-## Deployment
-
-To start, we support Docker.
+## Deployment with Docker
 
 1. ssh into your VM or server where you'll want to run Keycast.
 1. Install docker following the instructions for your OS here: https://docs.docker.com/engine/install
 1. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
-1. There are two things you need to update:
-  1. Set the domain name in the [`docker-compose.yml`](./docker-compose.yml) file.
-  1. Run `cp /web/.env.sample /web/.env` and update the `PUBLIC_DOMAIN` variable with your domain name.
-  1. (Optional) If you're going to use the caddy reverse proxy, you'll need to update the domain names in the [`docker-compose.yml`](./docker-compose.yml) file and [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file.
+1. Create a .env file with `cp .env.example .env` and update the `DOMAIN` environment variable to be the domain you want to use. Remember to set your DNS records.
+1. (Optional) If you're going to use the caddy reverse proxy, you'll want to set up a Caddy container on your VM as well. There is an example docker-compose file that you can use to get started: [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml).
 1. Build and run the docker image with `sudo docker compose up -d --build`.
 
 ### VM requirements
@@ -90,9 +85,9 @@ The running app requires very little resources but in order to build the docker 
 
 ### Reverse proxy
 
-The included [`docker-compose.yml`](./docker-compose.yml) file will attempt to setup a reverse proxy on your server. If you want to use this, you'll need to have a domain name and update the caddyfile with your domain name.
+The included [`docker-compose.yml`](./docker-compose.yml) file provides some caddy labels that a caddy reverse proxy docker conatiner will pick up and use to generate SSL certs and wire up the port forwarding required.
 
-This also reqiures that your service is running a caddy proxy container. The included [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file can be used to start a caddy proxy container and link it to the keycast network.
+This reqiures that your service is running a caddy proxy container. The included [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml) file can be used to start a caddy proxy container and link it to the keycast network.
 
 ## License
 
