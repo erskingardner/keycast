@@ -9,7 +9,10 @@ export class KeycastApi {
     constructor() {
         const apiDomain =
             import.meta.env.VITE_DOMAIN || "http://localhost:3000";
-        this.baseUrl = `${apiDomain}/api`;
+        const domain = apiDomain.startsWith("http")
+            ? apiDomain
+            : `https://${apiDomain}`;
+        this.baseUrl = `${domain}/api`;
         console.log("Constructor baseUrl:", this.baseUrl);
         this.defaultHeaders = {
             "Content-Type": "application/json",
