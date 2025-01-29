@@ -25,7 +25,7 @@ let inlineTeamNameInput: HTMLInputElement | null = $state(null);
 let inlineTeamError: string | null = $state(null);
 let inlineTeamName = $state("");
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN;
+const apiDomain = import.meta.env.VITE_DOMAIN;
 console.log(apiDomain);
 
 $effect(() => {
