@@ -77,6 +77,10 @@ To make your custom permission usable in the app, you'll also need to reference 
 1. (Optional) If you're going to use the caddy reverse proxy, you'll want to set up a Caddy container on your VM as well. There is an example docker-compose file that you can use to get started: [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml).
 1. Build and run the docker image with `sudo docker compose up -d --build`.
 
+## Updating the app
+
+To update the app on your server, simply run `git pull` to get the latest changes and then run `sudo docker compose up -d --build` to rebuild and restart the container.
+
 ### VM requirements
 
 The running app requires very little resources but in order to build the docker images you'll need at least 2GB of RAM (usually helps to have some swap space set up as well). If you're seeing the following errors when building, try to increase the swap space on your VM or use a larger VM.
