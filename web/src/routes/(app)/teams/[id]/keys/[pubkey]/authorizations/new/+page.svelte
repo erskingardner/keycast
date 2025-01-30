@@ -94,7 +94,7 @@ async function createAuthorization() {
     }
 
     const request = {
-        max_uses: maxUses,
+        max_uses: maxUses === 0 ? null : maxUses,
         expires_at: expiresAt
             ? Math.floor(new Date(expiresAt).getTime() / 1000)
             : null,
