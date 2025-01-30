@@ -8,8 +8,8 @@ elif [ "$1" = "web" ]; then
     # For web, check the /health endpoint
     curl -f http://localhost:5173/health || exit 1
 elif [ "$1" = "signer" ]; then
-    # For signer, check if main process exists in Docker
-    [ -d "/proc/1" ] || exit 1
+    # For signer, check if the keycast_signer process is running
+    pgrep keycast_signer || exit 1
 else
     # Check all services if no argument provided
     curl -f http://localhost:3000/health || exit 1
