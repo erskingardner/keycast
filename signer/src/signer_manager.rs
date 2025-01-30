@@ -133,9 +133,14 @@ impl SignerManager {
             binary_path
         );
 
+        // Get master key path from environment, defaulting to /app/master.key if not set
+        let master_key_path =
+            std::env::var("MASTER_KEY_PATH").unwrap_or_else(|_| "/app/master.key".to_string());
+
         let child = Command::new(binary_path)
             .env("AUTH_ID", auth_id.to_string())
             .env("DATABASE_URL", self.database_url.clone())
+            .env("MASTER_KEY_PATH", master_key_path)
             .spawn()
             .map_err(|_| SignerManagerError::Spawn)?;
 

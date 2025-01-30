@@ -75,9 +75,9 @@ To make your custom permission usable in the app, you'll also need to reference 
 1. ssh into your VM or server where you'll want to run Keycast.
 1. Install docker following the instructions for your OS here: https://docs.docker.com/engine/install
 1. Clone the repository and navigate to the root directory. `git clone https://github.com/erskingardner/keycast.git && cd keycast`
-1. Create a .env file with `cp .env.example .env` and update the `DOMAIN` environment variable to be the domain you want to use. Remember to set your DNS records.
+1. Run the init script with a domain: `bash scripts/init.sh <domain>` (you should provide the domain without the protocol (e.g. `https://`) that you want to use for your Keycast instance)
 1. (Optional) If you're going to use the caddy reverse proxy, you'll want to set up a Caddy container on your VM as well. There is an example docker-compose file that you can use to get started: [`caddy-docker-compose-example.yml`](./caddy-docker-compose-example.yml).
-1. Build and run the docker image with `sudo docker compose up -d --build`.
+1. Build and run the docker image with `sudo docker compose up -d --build`. (If you have trouble with the build step stalling while transforming or "Rendering chunks", this is because Vite is non-deterministic and the build step is likely stuck waiting for a lock on the file system. Just cancel the build and run it again - it can take a few tries to get it to build.)
 
 ## Updating the app
 

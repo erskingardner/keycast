@@ -37,8 +37,11 @@ elif [ "$1" = "web" ]; then
     fi
     echo "Starting web server..."
     exec bun web/index.js
+elif [ "$1" = "signer" ]; then
+    echo "Starting signer daemon..."
+    exec ./keycast_signer
 else
     echo "Unknown command: $1"
-    echo "Available commands: api, web"
+    echo "Available commands: api, web, signer"
     exit 1
 fi

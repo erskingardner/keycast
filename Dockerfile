@@ -82,6 +82,7 @@ RUN mkdir -p /app/database
 # Copy built artifacts (be more specific with the binary names)
 COPY --from=rust-builder /app/target/release/keycast_api ./
 COPY --from=rust-builder /app/target/release/keycast_signer ./
+COPY --from=rust-builder /app/target/release/signer_daemon ./
 COPY --from=web-builder /app/master.key ./
 COPY --from=web-builder /app/build ./web
 COPY --from=web-builder /app/package.json ./

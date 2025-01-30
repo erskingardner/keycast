@@ -7,6 +7,7 @@ services:
       - "3000:3000"
     volumes:
       - ./database:/app/database
+      - ./master.key:/app/master.key
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "api"]
       interval: 10s
@@ -58,6 +59,34 @@ services:
     labels:
       - "caddy=${DOMAIN:?error}"
       - "caddy.reverse_proxy=/* {{upstreams 5173}}"
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+        compress: "true"
+
+  keycast-signer:
+    container_name: keycast-signer
+    build:
+      context: .
+    command: signer
+    volumes:
+      - ./database:/app/database
+      - ./signer/config.toml:/app/signer/config.toml
+      - ./master.key:/app/master.key
+    environment:
+      - RUST_LOG=debug,keycast_signer=debug
+      - MASTER_KEY_PATH=/app/master.key
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh", "signer"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - keycast
     logging:
       driver: "json-file"
       options:
