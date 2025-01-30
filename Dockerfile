@@ -37,13 +37,16 @@ WORKDIR /app
 COPY ./web .
 COPY ./scripts ./scripts
 
-# Check/generate master.key before building
-RUN if [ -f ../master.key ]; then \
-    cp ../master.key .; \
-    else \
-    echo "No master.key found, will generate one"; \
-    bun run scripts/generate_key.ts; \
-    fi
+# Check for required files before building
+RUN if [ ! -f ./master.key ]; then \
+    echo "Error: master.key file is required but not found. Please provide a master.key file before building."; \
+    exit 1; \
+    fi && \
+    if [ ! -f .env ]; then \
+    echo "Error: .env file is required but not found. Please provide a .env file before building."; \
+    exit 1; \
+    fi && \
+    cp ./master.key .
 
 # Install dependencies and build
 RUN bun install
