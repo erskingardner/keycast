@@ -118,7 +118,7 @@ async function createTeam(inline = false) {
 </script>
 
 <div class="flex flex-col md:flex-row items-center justify-between mb-4">
-    <h1 class="page-header !mb-0 self-start md:self-center">Teams</h1>
+    <h1 class="page-header mb-0! self-start md:self-center">Teams</h1>
     {#if inlineTeamFormVisible}
         <form onsubmit={() => createTeam(true)} class="self-end md:self-center">
             <div class="flex flex-row gap-2">

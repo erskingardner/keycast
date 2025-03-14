@@ -33,7 +33,7 @@ async function copyToClipboard(textToCopy: string) {
 }
 </script>
     
-    <button onclick={copyListId} class="border-none outline-none ring-none {extraClasses}">
+    <button onclick={copyListId} class="border-none outline-hidden ring-none {extraClasses}">
         {#if copySuccess}
             <Check weight="light" {size} class="text-green-500" />
         {:else}

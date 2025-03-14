@@ -136,7 +136,7 @@ async function removeUser(userToRemove: User) {
     <PageSection title="Members">
         <div class="card-grid mb-4">
             {#each users as user}
-                <div class="card flex !flex-row gap-4 relative">
+                <div class="card flex flex-row! gap-4 relative">
                     <Avatar user={ndk.getUser({ pubkey: user.user_public_key })} extraClasses="w-12 h-12" />
                     <div class="flex flex-col gap-1">
                         <span class="font-semibold">
@@ -165,7 +165,7 @@ async function removeUser(userToRemove: User) {
             {:else}
                 <div class="card-grid">
                     {#each storedKeys as key}
-                        <a href={`/teams/${id}/keys/${key.public_key}`} class="card hover-card flex !flex-row gap-4 ">
+                        <a href={`/teams/${id}/keys/${key.public_key}`} class="card hover-card flex flex-row! gap-4 ">
                             <Avatar user={ndk.getUser({ pubkey: key.public_key })} extraClasses="w-12 h-12" />
                             <div class="flex flex-col gap-1">
                                 <span class="font-semibold">

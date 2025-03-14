@@ -21,7 +21,7 @@ const activePage = $derived($page.url.pathname);
 
     <nav class="flex flex-row items-center justify-start gap-4">
         {#if user}
-            <a class="{activePage === '/teams' ? 'active' : ''} bordered" href="/teams">Teams</a>
+            <a class="nav-link {activePage === '/teams' ? 'active' : ''} bordered" href="/teams">Teams</a>
             <button
                 onclick={() => signout(ndk)}
                 ontouchend={() => signout(ndk)}
@@ -44,13 +44,3 @@ const activePage = $derived($page.url.pathname);
         {/if}
     </nav>
 </div>
-
-<style lang="postcss">
-    nav > a {
-        @apply hover:border-b hover:border-gray-200 hover:text-gray-200 text-gray-400;
-    }
-
-    nav > a.active {
-        @apply border-b border-gray-200 text-gray-200;
-    }
-</style>

@@ -74,11 +74,11 @@ let contentFilterConfig: ContentFilterConfig = $state({
         <a href="https://github.com/nostr-protocol/nips?tab=readme-ov-file#event-kinds" target="_blank" class="text-xs text-gray-400 border-b border-gray-400 border-dashed hover:border-solid mb-4 inline-block">List of event kinds</a>
         <div class="flex flex-col gap-2 w-full">
             <div class="grid grid-cols-[auto_1fr] items-center gap-2 w-full">
-                <label class="text-base font-medium !my-0 !py-0" for="allowedKindsSign">Sign</label>
+                <label class="text-base font-medium my-0! py-0!" for="allowedKindsSign">Sign</label>
                 <input class="w-full" type="text" bind:value={allowedKindsSign} />
-                <label class="text-base font-medium !my-0 !py-0" for="allowedKindsEncrypt">Encrypt</label>
+                <label class="text-base font-medium my-0! py-0!" for="allowedKindsEncrypt">Encrypt</label>
                 <input class="w-full" type="text" bind:value={allowedKindsEncrypt} />
-                <label class="text-base font-medium !my-0 !py-0" for="allowedKindsDecrypt">Decrypt</label>
+                <label class="text-base font-medium my-0! py-0!" for="allowedKindsDecrypt">Decrypt</label>
                 <input class="w-full" type="text" bind:value={allowedKindsDecrypt} />
             </div>
         </div>
@@ -89,7 +89,7 @@ let contentFilterConfig: ContentFilterConfig = $state({
         </h3>
         <div class="flex flex-col gap-2 w-full">
             <div class="grid grid-cols-[auto_1fr] items-center gap-2 w-full">
-                <label class="text-base font-medium !my-0 !py-0" for="contentFilterBlockedWords">Blocked words</label>
+                <label class="text-base font-medium my-0! py-0!" for="contentFilterBlockedWords">Blocked words</label>
                 <input class="w-full" type="text" bind:value={contentFilterWords} />
             </div>
         </div>
