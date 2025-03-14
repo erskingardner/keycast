@@ -1,14 +1,45 @@
-@import "tailwindcss/base";
-@import "tailwindcss/components";
-@import "tailwindcss/utilities";
+@import 'tailwindcss';
+
+@plugin '@tailwindcss/typography';
+@plugin '@tailwindcss/forms';
+
+@custom-variant dark (&:is(.dark *));
+
+@theme {
+  --font-*: initial;
+  --font-sans: system-ui, -apple-system, sans-serif;
+  --font-mono: system-mono, monospace;
+}
+
+@utility container {
+  margin-inline: auto;
+}
+
+/*
+  The default border color has changed to `currentColor` in Tailwind CSS v4,
+  so we've added these compatibility styles to make sure everything still
+  looks the same as it did with Tailwind CSS v3.
+
+  If we ever want to remove these styles, we need to add an explicit border
+  color utility to any element that depends on these defaults.
+*/
+@layer base {
+  *,
+  ::after,
+  ::before,
+  ::backdrop,
+  ::file-selector-button {
+    border-color: var(--color-gray-200, currentColor);
+  }
+}
 
 :global(:root) {
     color-scheme: dark;
 }
 
 :global(html) {
-    background-color: theme("colors.gray.900");
-    color: theme("colors.gray.100");
+    background-color: var(--color-gray-900);
+    color: var(--color-gray-100);
 }
 
 /* Force dark mode even if user's system is in light mode */
@@ -20,8 +51,8 @@
 
 :root {
     font-family: system-ui, -apple-system, sans-serif;
-    background-color: theme("colors.gray.900");
-    color: theme("colors.gray.100");
+    background-color: var(--color-gray-900);
+    color: var(--color-gray-100);
     padding: 1rem;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
@@ -89,4 +120,16 @@ input[type="text"], input[type="password"], select, input[type="number"], input[
 
 .input-error {
     @apply text-red-500 text-sm;
+}
+
+.feature-panel {
+    @apply relative overflow-hidden bg-gray-500/5 backdrop-blur-xl rounded-xl p-6 border border-white/20 shadow-lg shadow-gray-900/15 hover:bg-gray-500/10 transition-all duration-300;
+}
+
+.nav-link {
+    @apply hover:border-b hover:border-gray-200 hover:text-gray-200 text-gray-400;
+}
+
+.nav-link.active {
+    @apply border-b border-gray-200 text-gray-200;
 }

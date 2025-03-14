@@ -20,7 +20,7 @@ function copyConnectionString(authorization: AuthorizationWithRelations) {
 
 <div class="card">
     <h3 class="font-mono text-sm">{authorization.authorization.secret}</h3>
-    <button onclick={() => copyConnectionString(authorization)} class="flex flex-row gap-2 items-center justify-center button button-primary button-icon {copyConnectionSuccess ? '!bg-green-600 !text-white !ring-green-600' : ''} transition-all duration-200">
+    <button onclick={() => copyConnectionString(authorization)} class="flex flex-row gap-2 items-center justify-center button button-primary button-icon {copyConnectionSuccess ? 'bg-green-600! text-white! ring-green-600!' : ''} transition-all duration-200">
         {#if copyConnectionSuccess}
             <Check size="20" />
             Copied!

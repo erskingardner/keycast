@@ -50,25 +50,21 @@ onMount(() => {
 <div class="container">
 	<!-- Background orbs -->
     <div class="fixed inset-0 -z-10">
-        <div class="blob top-10 left-1/4 w-[600px] h-[600px] bg-purple-500/10 animate-blob"></div>
-        <div class="blob top-1/2 -right-20 w-96 h-96 bg-red-500/10 animate-blob animation-delay-2000"></div>
-        <div class="blob bottom-20 left-32 w-72 h-72 bg-orange-500/10 animate-blob animation-delay-5500"></div>
+        <div class="absolute rounded-full mix-blend-multiply filter blur-3xl top-10 left-1/4 w-[600px] h-[600px] bg-purple-500/10 animate-blob"></div>
+        <div class="absolute rounded-full mix-blend-multiply filter blur-3xl top-1/2 -right-20 w-96 h-96 bg-red-500/10 animate-blob animation-delay-2000"></div>
+        <div class="absolute rounded-full mix-blend-multiply filter blur-3xl bottom-20 left-32 w-72 h-72 bg-orange-500/10 animate-blob animation-delay-5500"></div>
     </div>
 	{@render children()}
 </div>
 
 
-<style lang="postcss">
+<style>
 	@keyframes blob {
         0% { transform: translate(0px, 0px) scale(1); }
         33% { transform: translate(30px, -50px) scale(1.4); }
         66% { transform: translate(-20px, 20px) scale(0.8); }
         100% { transform: translate(0px, 0px) scale(1); }
     }
-
-	.blob {
-		@apply absolute rounded-full mix-blend-multiply filter blur-3xl animate-blob;
-	}
 
     .animate-blob {
         animation: blob 14s infinite;

@@ -33,11 +33,7 @@
     </div>
 </div>
 
-<style lang="postcss">
-    .feature-panel {
-        @apply relative overflow-hidden bg-gray-500/5 backdrop-blur-xl rounded-xl p-6 border border-white/20 shadow-lg shadow-gray-900/15 hover:bg-gray-500/10 transition-all duration-300;
-    }
-
+<style>
     .feature-panel::before {
         content: '';
         position: absolute;

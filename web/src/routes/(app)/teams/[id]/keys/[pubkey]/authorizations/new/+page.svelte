@@ -174,7 +174,7 @@ async function createAuthorization() {
                     {#each policies as policy}
                         <!-- svelte-ignore a11y_click_events_have_key_events -->
                         <div
-                            class="card hover-card {selectedPolicyId === policy.policy.id ? '!ring-2 !ring-indigo-500' : ''}"
+                            class="card hover-card {selectedPolicyId === policy.policy.id ? 'ring-2! ring-indigo-500!' : ''}"
                             onclick={() => selectedPolicyId = policy.policy.id}
                             role="button"
                             tabindex="0"
@@ -195,7 +195,7 @@ async function createAuthorization() {
                     {/each}
                 </div>
             {/if}
-            <a href={`/teams/${id}/policies/new`} class="button self-start button-primary !my-0">Add Policy</a>
+            <a href={`/teams/${id}/policies/new`} class="button self-start button-primary my-0!">Add Policy</a>
         </div>
     </PageSection>
 
