@@ -1,13 +1,32 @@
+x-keycast-build: &keycast-build
+  context: .
+  args:
+    KEYCAST_UID: ${KEYCAST_UID:-10001}
+    KEYCAST_GID: ${KEYCAST_GID:-10001}
+
+x-keycast-hardening: &keycast-hardening
+  user: "${KEYCAST_UID:-10001}:${KEYCAST_GID:-10001}"
+  read_only: true
+  tmpfs:
+    - /tmp:size=64m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+
 services:
   keycast-api:
+    <<: *keycast-hardening
     container_name: keycast-api
-    build: .
+    build: *keycast-build
     command: api
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     volumes:
-      - ./database:/app/database
-      - ./master.key:/app/master.key
+      - ./database:/app/database:rw
+      - ./master.key:/app/master.key:ro
+    environment:
+      - "ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS:?error}"
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "api"]
       interval: 10s
@@ -28,12 +47,15 @@ services:
         compress: "true"
 
   keycast-web:
+    <<: *keycast-hardening
     container_name: keycast-web
     build:
-      context: .
+      <<: *keycast-build
       args:
-        - VITE_DOMAIN=${DOMAIN:?error}
-        - VITE_ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS}
+        KEYCAST_UID: ${KEYCAST_UID:-10001}
+        KEYCAST_GID: ${KEYCAST_GID:-10001}
+        VITE_DOMAIN: ${DOMAIN:?error}
+        VITE_ALLOWED_PUBKEYS: ${ALLOWED_PUBKEYS:?error}
     command: web
     expose:
       - "5173"
@@ -46,7 +68,7 @@ services:
       - HOST=0.0.0.0
       - PORT=5173
       - "VITE_DOMAIN=${DOMAIN:?error}"
-      - "VITE_ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS}"
+      - "VITE_ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS:?error}"
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "web"]
       interval: 10s
@@ -67,16 +89,16 @@ services:
         compress: "true"
 
   keycast-signer:
+    <<: *keycast-hardening
     container_name: keycast-signer
-    build:
-      context: .
+    build: *keycast-build
     command: signer
     volumes:
-      - ./database:/app/database
-      - ./signer/config.toml:/app/signer/config.toml
-      - ./master.key:/app/master.key
+      - ./database:/app/database:rw
+      - ./signer/config.toml:/app/signer/config.toml:ro
+      - ./master.key:/app/master.key:ro
     environment:
-      - RUST_LOG=debug,keycast_signer=debug
+      - RUST_LOG=info,keycast_signer=info
       - MASTER_KEY_PATH=/app/master.key
     healthcheck:
       test: ["CMD", "/usr/local/bin/healthcheck.sh", "signer"]

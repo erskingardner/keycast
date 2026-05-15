@@ -140,7 +140,7 @@ async function createAuthorization() {
 </h1>
 
 <PageSection title="Authorization">
-    <form onsubmit={() => createAuthorization()}>
+    <form onsubmit={(event) => { event.preventDefault(); createAuthorization(); }}>
         <div class="form-group">
             <label for="maxUses">Maximum uses (Zero for unlimited)</label>
             <input type="number" bind:value={maxUses} />

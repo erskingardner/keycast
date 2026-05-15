@@ -94,9 +94,7 @@ export type JsonValue =
     | { [key: string]: JsonValue };
 
 export type AllowedKindsConfig = {
-    sign: number[] | null;
-    encrypt: number[] | null;
-    decrypt: number[] | null;
+    allowed_kinds: number[] | null;
 };
 
 export type ContentFilterConfig = {

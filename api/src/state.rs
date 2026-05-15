@@ -1,6 +1,6 @@
 use keycast_core::encryption::KeyManager;
 use once_cell::sync::OnceCell;
-use sqlx::SqlitePool;
+use sqlx_sqlite::SqlitePool;
 use std::sync::Arc;
 use thiserror::Error;
 

@@ -1,9 +1,9 @@
 use crate::types::authorization::AuthorizationError;
 use crate::types::permission::{Permission, PermissionError};
 use async_trait::async_trait;
-use nostr::nips::nip46::Request;
+use nostr::nips::nip46::NostrConnectRequest;
 use nostr_sdk::{PublicKey, UnsignedEvent};
-use sqlx::SqlitePool;
+use sqlx_sqlite::SqlitePool;
 
 /// Provides methods for validating an authorization against it's permissions and other properties in the context of a request
 pub trait AuthorizationValidations {
@@ -12,7 +12,7 @@ pub trait AuthorizationValidations {
         &self,
         pool: &SqlitePool,
         pubkey: &PublicKey,
-        request: &Request,
+        request: &NostrConnectRequest,
     ) -> Result<bool, AuthorizationError>;
 }
 

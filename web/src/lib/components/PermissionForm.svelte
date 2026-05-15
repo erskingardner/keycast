@@ -4,42 +4,27 @@ import {
     type AllowedKindsConfig,
     type ContentFilterConfig,
 } from "$lib/types";
+import {
+    parseAllowedKindsInput,
+    parseBlockedWordsInput,
+} from "$lib/utils/permission_config";
 import { toTitleCase } from "$lib/utils/strings";
 import Tooltip from "./Tooltip.svelte";
 
 let { identifier = $bindable(), config = $bindable() } = $props();
 
-let allowedKindsSign: string = $state("");
-let allowedKindsEncrypt: string = $state("");
-let allowedKindsDecrypt: string = $state("");
+let allowedKinds: string = $state("");
 
 let contentFilterWords: string = $state("");
 
-function parseKinds(value: string): number[] | null {
-    if (!value?.trim()) return null;
-    return value
-        .split(",")
-        .map((s) => Number.parseInt(s.trim()))
-        .filter((n) => !Number.isNaN(n));
-}
-
-function parseWords(value: string): string[] | null {
-    if (!value?.trim()) return null;
-    return value.split(",").map((s) => s.trim());
-}
-
 let allowedKindsConfig: AllowedKindsConfig = $state({
-    sign: null,
-    encrypt: null,
-    decrypt: null,
+    allowed_kinds: null,
 });
 
 $effect(() => {
-    allowedKindsConfig.sign = parseKinds(allowedKindsSign);
-    allowedKindsConfig.encrypt = parseKinds(allowedKindsEncrypt);
-    allowedKindsConfig.decrypt = parseKinds(allowedKindsDecrypt);
+    allowedKindsConfig.allowed_kinds = parseAllowedKindsInput(allowedKinds);
 
-    contentFilterConfig.blocked_words = parseWords(contentFilterWords);
+    contentFilterConfig.blocked_words = parseBlockedWordsInput(contentFilterWords);
 
     switch (identifier) {
         case "allowed_kinds":
@@ -68,18 +53,14 @@ let contentFilterConfig: ContentFilterConfig = $state({
     </div>
     {#if identifier === "allowed_kinds"}
         <h3 class="flex flex-row items-center gap-2 mt-6 mb-1 font-semibold text-gray-300">
-            Which kinds are allowed for each permission type
-            <Tooltip content="Enter the allowed kinds as a comma separate list, blank will allow all kinds. e.g. 1, 7, 10002." size={18} />
+            Which event kinds are allowed
+            <Tooltip content="Enter the allowed kinds as a comma separated list. Blank allows all event kinds. e.g. 1, 7, 10002." size={18} />
         </h3>
         <a href="https://github.com/nostr-protocol/nips?tab=readme-ov-file#event-kinds" target="_blank" class="text-xs text-gray-400 border-b border-gray-400 border-dashed hover:border-solid mb-4 inline-block">List of event kinds</a>
         <div class="flex flex-col gap-2 w-full">
             <div class="grid grid-cols-[auto_1fr] items-center gap-2 w-full">
-                <label class="text-base font-medium my-0! py-0!" for="allowedKindsSign">Sign</label>
-                <input class="w-full" type="text" bind:value={allowedKindsSign} />
-                <label class="text-base font-medium my-0! py-0!" for="allowedKindsEncrypt">Encrypt</label>
-                <input class="w-full" type="text" bind:value={allowedKindsEncrypt} />
-                <label class="text-base font-medium my-0! py-0!" for="allowedKindsDecrypt">Decrypt</label>
-                <input class="w-full" type="text" bind:value={allowedKindsDecrypt} />
+                <label class="text-base font-medium my-0! py-0!" for="allowedKinds">Kinds</label>
+                <input id="allowedKinds" class="w-full" type="text" bind:value={allowedKinds} />
             </div>
         </div>
     {:else if identifier === "content_filter"}

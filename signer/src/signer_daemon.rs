@@ -1,10 +1,10 @@
-use dotenv::dotenv;
+use dotenvy::dotenv;
 use keycast_core::encryption::file_key_manager::FileKeyManager;
 use keycast_core::encryption::KeyManager;
 use keycast_core::traits::AuthorizationValidations;
 use keycast_core::types::authorization::Authorization;
 use nostr_connect::prelude::*;
-use sqlx::SqlitePool;
+use sqlx_sqlite::SqlitePool;
 use std::env;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt, EnvFilter};
 
@@ -87,7 +87,7 @@ impl<T: AuthorizationValidations> SignerActions<T> {
 }
 
 impl<T: AuthorizationValidations> NostrConnectSignerActions for SignerActions<T> {
-    fn approve(&self, pubkey: &PublicKey, request: &Request) -> bool {
+    fn approve(&self, pubkey: &PublicKey, request: &NostrConnectRequest) -> bool {
         tracing::debug!(target: "keycast_signer::signer_daemon", "Evaluating request: {:?}", request);
 
         // Validate the request against the authorization's policy and permissions

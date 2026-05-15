@@ -9,14 +9,13 @@ aes-gcm = "0.10"
 async-trait = "0.1"
 base64 = { workspace = true }
 chrono = { workspace = true }
-dotenv = { workspace = true }
 nostr = { workspace = true }
 nostr-sdk = {workspace = true}
 once_cell = "1.2"
-rand = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
+sqlx-sqlite = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

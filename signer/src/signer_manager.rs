@@ -1,5 +1,5 @@
 use keycast_core::types::authorization::{Authorization, AuthorizationError};
-use sqlx::SqlitePool;
+use sqlx_sqlite::SqlitePool;
 use std::collections::HashMap;
 use std::sync::Arc;
 use thiserror::Error;

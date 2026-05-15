@@ -19,12 +19,13 @@ path = "src/signer_daemon.rs"
 keycast_core = { path = "../core" }
 chrono = { workspace = true }
 config = { workspace = true }
-dotenv = { workspace = true }
+dotenvy = { workspace = true }
 nostr-sdk = {workspace = true}
 nostr = {workspace = true}
-nostr-connect = {version = "0.37", git="https://github.com/rust-nostr/nostr", rev="5ef7353789d54931b664639c11df1aa22e9aa37c"}
+nostr-connect = "=0.44.0"
 once_cell = { workspace = true }
 sqlx = { workspace = true }
+sqlx-sqlite = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

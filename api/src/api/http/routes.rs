@@ -4,7 +4,7 @@ use axum::{
     routing::{delete, get, post, put},
     Router,
 };
-use sqlx::SqlitePool;
+use sqlx_sqlite::SqlitePool;
 
 use crate::api::http::teams;
 
