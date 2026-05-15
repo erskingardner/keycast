@@ -1,20 +1,7 @@
 import type { Handle } from "@sveltejs/kit";
 import { redirect } from "@sveltejs/kit";
 import { isProtectedRoute } from "$lib/utils/routes";
-
-const csp = [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "object-src 'none'",
-    "frame-ancestors 'none'",
-    "form-action 'self'",
-    "script-src 'self'",
-    "style-src 'self' 'unsafe-inline'",
-    "img-src 'self' data:",
-    "font-src 'self' data:",
-    "connect-src 'self' https: wss:",
-    "upgrade-insecure-requests",
-].join("; ");
+import { cspHeaderValue } from "$lib/server/csp.js";
 
 export const handle: Handle = async ({ event, resolve }) => {
     const sessionCookie = event.cookies.get("keycastUserPubkey");
@@ -24,7 +11,9 @@ export const handle: Handle = async ({ event, resolve }) => {
 
     const response = await resolve(event);
 
-    response.headers.set("Content-Security-Policy", csp);
+    if (!response.headers.has("Content-Security-Policy")) {
+        response.headers.set("Content-Security-Policy", cspHeaderValue);
+    }
     response.headers.set("X-Content-Type-Options", "nosniff");
     response.headers.set("X-Frame-Options", "DENY");
     response.headers.set("Referrer-Policy", "no-referrer");
