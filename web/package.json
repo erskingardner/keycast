@@ -27,12 +27,16 @@
 		"vite": "7.3.2"
 	},
 	"dependencies": {
-		"@nostr-dev-kit/ndk": "2.15.2",
-		"@nostr-dev-kit/ndk-cache-dexie": "2.6.44",
 		"@sveltejs/kit": "2.57.1",
 		"@tailwindcss/forms": "0.5.10",
 		"@tailwindcss/typography": "0.5.16",
+		"applesauce-core": "^6.0.3",
+		"applesauce-loaders": "^6.0.0",
+		"applesauce-relay": "^6.0.3",
+		"applesauce-signers": "^6.0.1",
+		"nostr-tools": "^2.23.3",
 		"phosphor-svelte": "3.1.0",
+		"rxjs": "^7.8.2",
 		"tippy.js": "6.3.7"
 	},
 	"overrides": {

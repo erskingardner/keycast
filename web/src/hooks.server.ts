@@ -1,16 +1,8 @@
 import type { Handle } from "@sveltejs/kit";
-import { redirect } from "@sveltejs/kit";
-import { isProtectedRoute } from "$lib/utils/routes";
 import { cspHeaderValue } from "$lib/server/csp.js";
+import { isProtectedRoute } from "$lib/utils/routes";
 
-export const handle: Handle = async ({ event, resolve }) => {
-    const sessionCookie = event.cookies.get("keycastUserPubkey");
-    if (!sessionCookie && isProtectedRoute(event.url.pathname)) {
-        throw redirect(303, "/");
-    }
-
-    const response = await resolve(event);
-
+function applySecurityHeaders(response: Response, event: Parameters<Handle>[0]["event"]) {
     if (!response.headers.has("Content-Security-Policy")) {
         response.headers.set("Content-Security-Policy", cspHeaderValue);
     }
@@ -26,6 +18,22 @@ export const handle: Handle = async ({ event, resolve }) => {
             "max-age=31536000; includeSubDomains",
         );
     }
+}
+
+export const handle: Handle = async ({ event, resolve }) => {
+    const sessionCookie = event.cookies.get("keycastUserPubkey");
+    if (!sessionCookie && isProtectedRoute(event.url.pathname)) {
+        const response = new Response(null, {
+            status: 303,
+            headers: { Location: "/" },
+        });
+        applySecurityHeaders(response, event);
+        return response;
+    }
+
+    const response = await resolve(event);
+
+    applySecurityHeaders(response, event);
 
     return response;
 };

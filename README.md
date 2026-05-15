@@ -101,6 +101,9 @@ Run API, web, and signer together:
 bun run dev
 ```
 
+The local dev scripts run the API on `http://localhost:3100` and point the web app at that origin.
+The Docker/runtime default API port remains `3000`.
+
 Run pieces separately:
 
 ```sh

@@ -143,8 +143,8 @@ keeps the compatible Svelte plugin line, and adds targeted overrides for `cookie
 `rollup`, `svelte`, `tailwindcss`, and `vite`. `bun audit` now reports no vulnerabilities.
 
 A later Svelte advisory required an exception to the "about a month old" dependency policy:
-`svelte` was moved to 5.55.7 because that is the patched security release. NDK was deduped to 2.15.2,
-which removed the stale `websocket-polyfill` path and the old `es5-ext` lifecycle-script warning.
+`svelte` was moved to 5.55.7 because that is the patched security release. NDK was first deduped and
+then removed entirely in favor of Applesauce, which removed the stale NDK dependency surface.
 `@biomejs/biome` was removed because it was unused and only contributed a blocked install script.
 
 ### Fixed: `bun pm scan` was unavailable
@@ -160,11 +160,11 @@ scanner = "@socketsecurity/bun-security-scanner"
 Both Bun projects install `@socketsecurity/bun-security-scanner@1.1.2` exactly. Scans work without a
 token in Socket free mode; set `SOCKET_API_KEY` only when you want organization policy checks.
 
-### Fixed: `nostr-login` dependency and fallback auth path
+### Fixed: `nostr-login` and NDK dependency auth path
 
 The web app no longer imports or installs `nostr-login`. Sign-in now uses the raw NIP-07 browser
-extension API to fetch the active pubkey and attaches NDK's NIP-07 signer for subsequent event
-signing. This keeps the login path on an actively supported browser-extension boundary.
+extension API to fetch the active pubkey, and NIP-98 request signing now goes through Applesauce's
+extension signer. NDK is no longer installed in the web app.
 
 ### Fixed: Deployment defaults carried avoidable risk
 
@@ -202,8 +202,7 @@ Deployment hardening changes:
 
 The unused `TeamResponse` type was removed from the API type surface. The Svelte tooltip component now
 loads `tippy.js` dynamically on the client, so the SSR build no longer reports an unused external
-default import. Vite aliases NDK's `tseep` import to `tseep/lib/ee-safe.js`, removing the production
-`eval` warning instead of suppressing it.
+default import. NDK has been removed, so the earlier `tseep` alias is no longer needed.
 
 The SvelteKit Bun adapter generated a runtime websocket probe that logged a warning because the
 current SvelteKit server object does not expose `server.websocket`. The build now patches the generated

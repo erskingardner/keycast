@@ -1,11 +1,12 @@
 export type HttpAuthMethod = "GET" | "POST" | "PUT" | "DELETE";
+const DEFAULT_LOCAL_API_ORIGIN = "http://localhost:3100";
 
 export function normalizeApiBaseUrl(
     rawDomain: string | null | undefined,
     currentOrigin = runtimeOrigin(),
 ): string {
     const raw = String(rawDomain ?? "").trim();
-    const fallbackDomain = currentOrigin || "http://localhost:3000";
+    const fallbackDomain = currentOrigin || DEFAULT_LOCAL_API_ORIGIN;
     const configuredDomain = raw || fallbackDomain;
     const domain = /^https?:\/\//i.test(configuredDomain)
         ? configuredDomain

@@ -1,27 +1,31 @@
 <script lang="ts">
-import type { NDKUser, NDKUserProfile } from "@nostr-dev-kit/ndk";
+import {
+    loadProfile,
+    npubForPubkey,
+    type NostrProfile,
+} from "$lib/nostr";
 
 let {
-    user,
+    pubkey,
     userProfile,
     npubMaxLength = 9,
 }: {
-    user: NDKUser;
-    userProfile?: NDKUserProfile;
+    pubkey: string;
+    userProfile?: NostrProfile | null;
     npubMaxLength?: number;
 } = $props();
 
-let profile = $state<NDKUserProfile | null | undefined>(null);
+let profile = $state<NostrProfile | null | undefined>(null);
 
 $effect(() => {
-    const currentProfile = userProfile || user.profile;
+    const currentProfile = userProfile;
     if (currentProfile) {
         profile = currentProfile;
         return;
     }
 
     let cancelled = false;
-    user.fetchProfile().then((profileResponse: NDKUserProfile | null) => {
+    loadProfile(pubkey).then((profileResponse) => {
         if (!cancelled) {
             profile = profileResponse;
         }
@@ -33,7 +37,11 @@ $effect(() => {
 });
 
 let displayName = $derived(
-    profile?.displayName || profile?.name || user.npub.slice(0, npubMaxLength)
+    profile?.display_name ||
+        profile?.displayName ||
+        profile?.name ||
+        npubForPubkey(pubkey)?.slice(0, npubMaxLength) ||
+        pubkey.slice(0, npubMaxLength),
 );
 </script>
 

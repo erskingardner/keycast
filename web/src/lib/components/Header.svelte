@@ -1,7 +1,6 @@
 <script lang="ts">
 import { page } from "$app/stores";
 import { getCurrentUser } from "$lib/current_user.svelte";
-import ndk from "$lib/ndk.svelte";
 import { signin, signout } from "$lib/utils/auth";
 import { Key, SignIn, SignOut } from "phosphor-svelte";
 
@@ -23,8 +22,8 @@ const activePage = $derived($page.url.pathname);
         {#if user}
             <a class="nav-link {activePage === '/teams' ? 'active' : ''} bordered" href="/teams">Teams</a>
             <button
-                onclick={() => signout(ndk)}
-                ontouchend={() => signout(ndk)}
+                onclick={() => signout()}
+                ontouchend={() => signout()}
                 class="button button-secondary button-icon"
                 role="menuitem"
                 tabindex="-1"
@@ -35,7 +34,7 @@ const activePage = $derived($page.url.pathname);
             </button>
         {:else}
             <button
-                onclick={() => signin(ndk)}
+                onclick={() => signin()}
                 class="button button-primary button-icon"
             >
                 <SignIn size="20" />

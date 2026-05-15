@@ -9,7 +9,6 @@ import PageSection from "$lib/components/PageSection.svelte";
 import PolicyCard from "$lib/components/PolicyCard.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import ndk from "$lib/ndk.svelte";
 import type {
     PolicyWithPermissions,
     StoredKey,
@@ -17,7 +16,6 @@ import type {
     User,
 } from "$lib/types";
 import { truncatedNpubForPubkey } from "$lib/utils/nostr";
-import { type NDKEvent, NDKNip07Signer } from "@nostr-dev-kit/ndk";
 import { DotsThreeVertical } from "phosphor-svelte";
 import { toast } from "svelte-hot-french-toast";
 
@@ -26,39 +24,30 @@ const { id } = $page.params;
 const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 let isLoading = $state(true);
-let unsignedAuthEvent: NDKEvent | null = $state(null);
-let encodedAuthEvent: string | null = $state(null);
+let teamAuthHeader: string | null = $state(null);
 let team: TeamWithRelations | null = $state(null);
 let users: User[] = $state([]);
 let storedKeys: StoredKey[] = $state([]);
 let policies: PolicyWithPermissions[] = $state([]);
 
 $effect(() => {
-    if (user?.pubkey && !unsignedAuthEvent) {
-        api.buildUnsignedAuthEvent(`/teams/${id}`, "GET", user.pubkey).then(
-            async (event) => {
-                unsignedAuthEvent = event;
-                if (unsignedAuthEvent) {
-                    if (!ndk.signer) {
-                        ndk.signer = new NDKNip07Signer();
-                    }
-                    await unsignedAuthEvent.sign();
-                    encodedAuthEvent = `Nostr ${btoa(JSON.stringify(unsignedAuthEvent))}`;
-                    api.get(`/teams/${id}`, {
-                        headers: { Authorization: encodedAuthEvent },
-                    })
-                        .then((teamResponse) => {
-                            team = teamResponse as TeamWithRelations;
-                            users = team.team_users;
-                            storedKeys = team.stored_keys;
-                            policies = team.policies;
-                        })
-                        .finally(() => {
-                            isLoading = false;
-                        });
-                }
-            },
-        );
+    if (user?.pubkey && !teamAuthHeader) {
+        api.buildAuthHeader(`/teams/${id}`, "GET", user.pubkey)
+            .then((authHeader) => {
+                teamAuthHeader = authHeader;
+                return api.get(`/teams/${id}`, {
+                    headers: { Authorization: authHeader },
+                });
+            })
+            .then((teamResponse) => {
+                team = teamResponse as TeamWithRelations;
+                users = team.team_users;
+                storedKeys = team.stored_keys;
+                policies = team.policies;
+            })
+            .finally(() => {
+                isLoading = false;
+            });
     }
 });
 
@@ -69,19 +58,15 @@ async function deleteTeam() {
             "Are you sure you want to delete this team? This action is irreversible.",
         )
     ) {
-        const authEvent = await api.buildUnsignedAuthEvent(
+        const authHeader = await api.buildAuthHeader(
             `/teams/${id}`,
             "DELETE",
             user?.pubkey,
         );
-        if (!ndk.signer) {
-            ndk.signer = new NDKNip07Signer();
-        }
-        await authEvent?.sign();
 
         api.delete(`/teams/${id}`, {
             headers: {
-                Authorization: `Nostr ${btoa(JSON.stringify(authEvent))}`,
+                Authorization: authHeader,
             },
         }).then(() => {
             toast.success("Team deleted successfully");
@@ -101,19 +86,15 @@ async function removeUser(userToRemove: User) {
     if (!user?.pubkey) return;
     if (!confirm("Are you sure you want to remove this user?")) return;
 
-    const authEvent = await api.buildUnsignedAuthEvent(
+    const authHeader = await api.buildAuthHeader(
         `/teams/${id}/users/${userToRemove.user_public_key}`,
         "DELETE",
         user?.pubkey,
     );
-    if (!ndk.signer) {
-        ndk.signer = new NDKNip07Signer();
-    }
-    await authEvent?.sign();
 
     api.delete(`/teams/${id}/users/${userToRemove.user_public_key}`, {
         headers: {
-            Authorization: `Nostr ${btoa(JSON.stringify(authEvent))}`,
+            Authorization: authHeader,
         },
     })
         .then(() => {
@@ -137,10 +118,10 @@ async function removeUser(userToRemove: User) {
         <div class="card-grid mb-4">
             {#each users as user}
                 <div class="card flex flex-row! gap-4 relative">
-                    <Avatar user={ndk.getUser({ pubkey: user.user_public_key })} extraClasses="w-12 h-12" />
+                    <Avatar pubkey={user.user_public_key} extraClasses="w-12 h-12" />
                     <div class="flex flex-col gap-1">
                         <span class="font-semibold">
-                            <Name user={ndk.getUser({ pubkey: user.user_public_key })} />
+                            <Name pubkey={user.user_public_key} />
                         </span>
                         <span class="font-mono text-xs text-gray-500">
                             {truncatedNpubForPubkey(user.user_public_key)}&hellip;
@@ -166,14 +147,14 @@ async function removeUser(userToRemove: User) {
                 <div class="card-grid">
                     {#each storedKeys as key}
                         <a href={`/teams/${id}/keys/${key.public_key}`} class="card hover-card flex flex-row! gap-4 ">
-                            <Avatar user={ndk.getUser({ pubkey: key.public_key })} extraClasses="w-12 h-12" />
+                            <Avatar pubkey={key.public_key} extraClasses="w-12 h-12" />
                             <div class="flex flex-col gap-1">
                                 <span class="font-semibold">
                                     {key.name}
                                 </span>
                                 <div class="flex flex-row gap-1">
                                     <span class="text-xs text-gray-500">
-                                        <Name user={ndk.getUser({ pubkey: key.public_key })} />
+                                        <Name pubkey={key.public_key} />
                                     </span>
                                     <span class="font-mono text-xs text-gray-500">
                                         ({truncatedNpubForPubkey(key.public_key)}&hellip;)

@@ -9,7 +9,11 @@ import Name from "$lib/components/Name.svelte";
 import PageSection from "$lib/components/PageSection.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import ndk from "$lib/ndk.svelte";
+import {
+    loadProfile,
+    userFromPubkey,
+    type NostrProfile,
+} from "$lib/nostr";
 import type {
     AuthorizationWithRelations,
     KeyWithRelations,
@@ -17,60 +21,50 @@ import type {
     Team,
 } from "$lib/types";
 import { formattedDate } from "$lib/utils/dates";
-import {
-    type NDKEvent,
-    NDKNip07Signer,
-    type NDKUser,
-    type NDKUserProfile,
-} from "@nostr-dev-kit/ndk";
+import { safeRemoteImageUrl } from "$lib/utils/image_url";
 import { CaretRight } from "phosphor-svelte";
 import { toast } from "svelte-hot-french-toast";
 
-const { id, pubkey } = $page.params;
+const id = $page.params.id ?? "";
+const pubkey = $page.params.pubkey ?? "";
 
 const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 let isLoading = $state(true);
-let unsignedAuthEvent: NDKEvent | null = $state(null);
-let encodedAuthEvent: string | null = $state(null);
+let keyAuthHeader: string | null = $state(null);
 let team: Team | null = $state(null);
 let key: StoredKey | null = $state(null);
 let authorizations: AuthorizationWithRelations[] = $state([]);
-let keyUser: NDKUser | null = ndk.getUser({ pubkey });
-let keyUserProfile: NDKUserProfile | null = $state(null);
+let keyUser = $derived(userFromPubkey(pubkey));
+let keyUserProfile = $state<NostrProfile | null>(null);
+let keyUserBannerUrl = $derived(safeRemoteImageUrl(keyUserProfile?.banner));
 
 $effect(() => {
-    if (user?.pubkey && !unsignedAuthEvent) {
-        api.buildUnsignedAuthEvent(
+    if (user?.pubkey && !keyAuthHeader) {
+        api.buildAuthHeader(
             `/teams/${id}/keys/${pubkey}`,
             "GET",
             user.pubkey,
-        ).then(async (event) => {
-            unsignedAuthEvent = event;
-            if (unsignedAuthEvent) {
-                if (!ndk.signer) {
-                    ndk.signer = new NDKNip07Signer();
-                }
-                await unsignedAuthEvent.sign();
-                encodedAuthEvent = `Nostr ${btoa(JSON.stringify(unsignedAuthEvent))}`;
-                api.get(`/teams/${id}/keys/${pubkey}`, {
-                    headers: { Authorization: encodedAuthEvent },
-                })
-                    .then((teamKeyResponse) => {
-                        key = (teamKeyResponse as KeyWithRelations).stored_key;
-                        team = (teamKeyResponse as KeyWithRelations).team;
-                        authorizations = (teamKeyResponse as KeyWithRelations)
-                            .authorizations;
-                    })
-                    .finally(() => {
-                        isLoading = false;
-                    });
-            }
-        });
+        )
+            .then((authHeader) => {
+                keyAuthHeader = authHeader;
+                return api.get(`/teams/${id}/keys/${pubkey}`, {
+                    headers: { Authorization: authHeader },
+                });
+            })
+            .then((teamKeyResponse) => {
+                key = (teamKeyResponse as KeyWithRelations).stored_key;
+                team = (teamKeyResponse as KeyWithRelations).team;
+                authorizations = (teamKeyResponse as KeyWithRelations)
+                    .authorizations;
+            })
+            .finally(() => {
+                isLoading = false;
+            });
     }
 
     if (key && !keyUserProfile) {
-        keyUser.fetchProfile().then((profile) => {
+        loadProfile(pubkey).then((profile) => {
             keyUserProfile = profile;
         });
     }
@@ -85,19 +79,15 @@ async function removeKey() {
     )
         return;
 
-    const authEvent = await api.buildUnsignedAuthEvent(
+    const authHeader = await api.buildAuthHeader(
         `/teams/${id}/keys/${pubkey}`,
         "DELETE",
         user?.pubkey,
     );
-    if (!ndk.signer) {
-        ndk.signer = new NDKNip07Signer();
-    }
-    await authEvent?.sign();
 
     api.delete(`/teams/${id}/keys/${pubkey}`, {
         headers: {
-            Authorization: `Nostr ${btoa(JSON.stringify(authEvent))}`,
+            Authorization: authHeader,
         },
     })
         .then(() => {
@@ -122,25 +112,25 @@ async function removeKey() {
         class="relative"
     >
         <div class="absolute inset-0 bg-cover bg-center bg-gray-800 overflow-hidden rounded-lg">
-            {#if keyUserProfile?.banner}
-                <img src={keyUserProfile.banner} alt="Banner" class="opacity-20 w-full h-full object-cover object-center rounded-lg" />
+            {#if keyUserBannerUrl}
+                <img src={keyUserBannerUrl} alt="Banner" referrerpolicy="no-referrer" class="opacity-20 w-full h-full object-cover object-center rounded-lg" />
             {:else}
                 <div class="w-full h-full bg-gray-800"></div>
             {/if}
         </div>
         <div class="relative p-6 flex items-center gap-4">
-            <Avatar user={ndk.getUser({ pubkey })} extraClasses="w-24 h-24" />
+            <Avatar {pubkey} userProfile={keyUserProfile} extraClasses="w-24 h-24" />
             <div class="flex flex-col gap-1 truncate">
                 <span class="font-semibold text-lg">
-                    <Name user={ndk.getUser({ pubkey })} />
+                    <Name {pubkey} userProfile={keyUserProfile} />
                 </span>
                 <span class="text-xs font-mono text-gray-300 flex flex-row gap-2 items-center justify-between truncate">
-                    <span class="truncate">{keyUser.npub}</span>
-                    <Copy value={keyUser.npub} size="18" />
+                    <span class="truncate">{keyUser?.npub}</span>
+                    <Copy value={keyUser?.npub || ""} size="18" />
                 </span>
                 <span class="text-xs font-mono text-gray-300 flex flex-row gap-2 items-center justify-between truncate">
-                    <span class="truncate">{keyUser.pubkey}</span>
-                    <Copy value={keyUser.pubkey} size="18" />
+                    <span class="truncate">{keyUser?.pubkey}</span>
+                    <Copy value={keyUser?.pubkey || ""} size="18" />
                 </span>
                 <span class="text-xs font-mono text-gray-400 mt-2">
                     Added: {formattedDate(new Date(key.created_at))}

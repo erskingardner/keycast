@@ -3,10 +3,8 @@ import { goto } from "$app/navigation";
 import { page } from "$app/stores";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import ndk from "$lib/ndk.svelte";
 import type { User } from "$lib/types";
 import { userFromPubkeyOrNpub } from "$lib/utils/nostr";
-import { type NDKEvent, NDKNip07Signer } from "@nostr-dev-kit/ndk";
 import { toast } from "svelte-hot-french-toast";
 
 const { id } = $page.params;
@@ -14,7 +12,6 @@ const { id } = $page.params;
 const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 
-let unsignedAuthEvent: NDKEvent | null = $state(null);
 let pubkeyOrNpub: string = $state("");
 let role: "Admin" | "Member" = $state("Member");
 let errorMessage: string | null = $state(null);
@@ -26,49 +23,40 @@ async function addTeammate() {
         return;
     }
 
-    const ndkUser = userFromPubkeyOrNpub(pubkeyOrNpub);
+    const teammate = userFromPubkeyOrNpub(pubkeyOrNpub);
 
-    if (!ndkUser) {
+    if (!teammate) {
         errorMessage = "Invalid public key or npub.";
         return;
     }
 
-    api.buildUnsignedAuthEvent(
+    api.buildAuthHeader(
         `/teams/${id}/users`,
         "POST",
         user.pubkey,
         JSON.stringify({
-            user_public_key: ndkUser.pubkey,
+            user_public_key: teammate.pubkey,
             role,
         }),
-    ).then(async (event) => {
-        unsignedAuthEvent = event;
-        if (unsignedAuthEvent) {
-            if (!ndk.signer) {
-                ndk.signer = new NDKNip07Signer();
-            }
-            await unsignedAuthEvent.sign();
-            console.log(unsignedAuthEvent);
-            const encodedAuthEvent = `Nostr ${btoa(JSON.stringify(unsignedAuthEvent))}`;
-            api.post<User>(
-                `/teams/${id}/users`,
-                {
-                    user_public_key: ndkUser.pubkey,
-                    role,
-                },
-                {
-                    headers: { Authorization: encodedAuthEvent },
-                },
-            )
-                .then((_newUser) => {
-                    toast.success("Teammate added successfully");
-                    goto(`/teams/${id}`);
-                })
-                .catch((error) => {
-                    toast.error("Failed to add teammate");
-                    errorMessage = error.message;
-                });
-        }
+    ).then((authHeader) => {
+        api.post<User>(
+            `/teams/${id}/users`,
+            {
+                user_public_key: teammate.pubkey,
+                role,
+            },
+            {
+                headers: { Authorization: authHeader },
+            },
+        )
+            .then((_newUser) => {
+                toast.success("Teammate added successfully");
+                goto(`/teams/${id}`);
+            })
+            .catch((error) => {
+                toast.error("Failed to add teammate");
+                errorMessage = error.message;
+            });
     });
 }
 </script>

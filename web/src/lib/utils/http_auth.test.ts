@@ -3,7 +3,7 @@ import { buildNip98Tags, normalizeApiBaseUrl, sha256Hex } from "./http_auth";
 
 describe("NIP-98 HTTP auth helpers", () => {
     test("normalizes configured domains into API base URLs", () => {
-        expect(normalizeApiBaseUrl(undefined, undefined)).toBe("http://localhost:3000/api");
+        expect(normalizeApiBaseUrl(undefined, undefined)).toBe("http://localhost:3100/api");
         expect(normalizeApiBaseUrl(undefined, "https://keycast.example.com")).toBe(
             "https://keycast.example.com/api",
         );

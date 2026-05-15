@@ -19,9 +19,18 @@ export const cspDirectives = {
     "form-action": ["self"],
     "script-src": ["self"],
     "style-src": ["self", "unsafe-inline"],
-    "img-src": ["self", "data:"],
+    "img-src": ["self", "data:", "blob:", "https:", "http:"],
     "font-src": ["self", "data:"],
-    "connect-src": ["self", "https:", "wss:"],
+    "connect-src": [
+        "self",
+        "https:",
+        "wss:",
+        "ws:",
+        "http://localhost:3100",
+        "http://127.0.0.1:3100",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
     "upgrade-insecure-requests": true,
 };
 
