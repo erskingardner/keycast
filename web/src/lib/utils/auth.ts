@@ -4,11 +4,10 @@ import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKNip07Signer, type NDKUser } from "@nostr-dev-kit/ndk";
 import toast from "svelte-hot-french-toast";
-import { fetchPubkeyAllowlist, isPubkeyAllowed } from "./allowlist";
+import { checkPubkeyAllowed } from "./allowlist";
 
 async function isAllowedPubkey(pubkey: string) {
-    const allowedPubkeys = await fetchPubkeyAllowlist();
-    return isPubkeyAllowed(pubkey, allowedPubkeys);
+    return checkPubkeyAllowed(pubkey);
 }
 
 export async function signin(ndk: NDK): Promise<NDKUser | null> {

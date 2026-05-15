@@ -89,9 +89,9 @@ Create `.env` from `.env.example` for Docker/deployment settings:
 cp .env.example .env
 ```
 
-`ALLOWED_PUBKEYS` is enforced by the API for NIP-98-authenticated requests. The API also exposes the
-same non-secret list at `/api/config` so the browser can block non-allowlisted sign-in attempts
-before showing the app.
+`ALLOWED_PUBKEYS` is enforced by the API for NIP-98-authenticated requests. The API also exposes an
+unauthenticated `/api/config?pubkey=<hex>` check so the browser can ask whether the current pubkey is
+allowed without receiving the full server allowlist.
 
 ## Development
 

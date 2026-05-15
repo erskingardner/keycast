@@ -3,6 +3,7 @@ pub mod teams;
 
 use axum::{
     body::{to_bytes, Body, Bytes},
+    extract::Query,
     http::{Request, StatusCode},
     middleware::Next,
     response::Response,
@@ -24,7 +25,12 @@ const MAX_AUTH_BODY_BYTES: usize = 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct PublicConfig {
-    pub allowed_pubkeys: Vec<String>,
+    pub pubkey_allowed: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
+pub struct PublicConfigQuery {
+    pub pubkey: String,
 }
 
 #[derive(Debug, Error)]
@@ -85,9 +91,9 @@ pub async fn auth_middleware(request: Request<Body>, next: Next) -> Response {
     next.run(request).await
 }
 
-pub async fn public_config() -> Json<PublicConfig> {
+pub async fn public_config(Query(query): Query<PublicConfigQuery>) -> Json<PublicConfig> {
     Json(PublicConfig {
-        allowed_pubkeys: configured_allowed_pubkeys(),
+        pubkey_allowed: is_allowed_pubkey_hex(&query.pubkey),
     })
 }
 
@@ -306,21 +312,22 @@ fn validate_payload_tag(event: &Event, body: &[u8]) -> Result<(), Authentication
 }
 
 fn is_allowed_pubkey(pubkey: &PublicKey) -> bool {
+    is_allowed_pubkey_hex(&pubkey.to_hex())
+}
+
+fn is_allowed_pubkey_hex(pubkey_hex: &str) -> bool {
     let allowed_pubkeys = configured_allowed_pubkeys();
     if allowed_pubkeys.is_empty() {
         return true;
     }
 
-    let pubkey_hex = pubkey.to_hex();
     allowed_pubkeys
         .iter()
         .any(|allowed| allowed.eq_ignore_ascii_case(&pubkey_hex))
 }
 
 fn configured_allowed_pubkeys() -> Vec<String> {
-    let allowed_pubkeys = env::var("ALLOWED_PUBKEYS")
-        .or_else(|_| env::var("VITE_ALLOWED_PUBKEYS"))
-        .unwrap_or_default();
+    let allowed_pubkeys = env::var("ALLOWED_PUBKEYS").unwrap_or_default();
 
     parse_allowed_pubkeys(&allowed_pubkeys)
 }
@@ -485,16 +492,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn public_config_exposes_allowlist_without_auth() {
+    async fn public_config_returns_only_requested_pubkey_status_without_auth() {
         let _guard = ENV_LOCK.lock().unwrap();
         let pool = setup_route_test_db().await;
         env::set_var("ALLOWED_PUBKEYS", "abc,def");
+
+        let response = crate::api::http::routes::routes(pool.clone())
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/config?pubkey=ABC")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), MAX_AUTH_BODY_BYTES)
+            .await
+            .unwrap();
+        let config: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(config, serde_json::json!({ "pubkey_allowed": true }));
 
         let response = crate::api::http::routes::routes(pool)
             .oneshot(
                 Request::builder()
                     .method(Method::GET)
-                    .uri("/config")
+                    .uri("/config?pubkey=abcdef")
                     .body(Body::empty())
                     .unwrap(),
             )
@@ -508,7 +533,7 @@ mod tests {
             .await
             .unwrap();
         let config: serde_json::Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(config["allowed_pubkeys"], serde_json::json!(["abc", "def"]));
+        assert_eq!(config, serde_json::json!({ "pubkey_allowed": false }));
     }
 
     #[test]

@@ -32,9 +32,9 @@ cargo test
 ## Current Audit Notes
 
 - NIP-98 validation now binds requests to method, URL, timestamp window, and request-body payload hash.
-- API allowlist enforcement reads `ALLOWED_PUBKEYS`, with `VITE_ALLOWED_PUBKEYS` as a local fallback.
-  An empty allowlist allows all valid NIP-98 pubkeys. The unauthenticated `/api/config` endpoint
-  exposes the same non-secret list for the browser sign-in gate.
+- API allowlist enforcement reads `ALLOWED_PUBKEYS`. An empty allowlist allows all valid NIP-98
+  pubkeys. The unauthenticated `/api/config?pubkey=<hex>` endpoint returns only whether that one
+  pubkey is allowed for the browser sign-in gate.
 - Authenticated request bodies are buffered for payload validation with a 1 MiB limit.
 - Policy creation rejects empty, unknown, or malformed permission configs.
 - Authorization creation verifies the selected policy belongs to the same team as the stored key.

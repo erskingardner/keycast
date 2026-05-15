@@ -1,40 +1,34 @@
 import { describe, expect, test } from "bun:test";
-import {
-    fetchPubkeyAllowlist,
-    isPubkeyAllowed,
-    parsePubkeyAllowlist,
-} from "./allowlist";
+import { checkPubkeyAllowed } from "./allowlist";
 
 describe("pubkey allowlist helpers", () => {
-    test("treats blank allowlists as open", () => {
-        expect(isPubkeyAllowed("abc", "")).toBe(true);
-        expect(isPubkeyAllowed("abc", " , ")).toBe(true);
-        expect(isPubkeyAllowed("abc", undefined)).toBe(true);
+    test("asks public API config whether one pubkey is allowed", async () => {
+        const requestedUrls: string[] = [];
+        const fetcher = async (input: RequestInfo | URL) => {
+            requestedUrls.push(String(input));
+            return new Response(JSON.stringify({ pubkey_allowed: true }), {
+                status: 200,
+            });
+        };
+
+        await expect(checkPubkeyAllowed("ABC 123", fetcher)).resolves.toBe(true);
+        expect(requestedUrls).toEqual([
+            "http://localhost:3000/api/config?pubkey=ABC+123",
+        ]);
     });
 
-    test("trims entries and requires exact matches", () => {
-        expect(parsePubkeyAllowlist(" abc,def ,, ghi ")).toEqual(["abc", "def", "ghi"]);
-        expect(parsePubkeyAllowlist([" abc ", "def", ""])).toEqual(["abc", "def"]);
-        expect(isPubkeyAllowed("abc", " abc,def ")).toBe(true);
-        expect(isPubkeyAllowed("abc", "abcdef")).toBe(false);
-    });
-
-    test("matches case-insensitively to mirror the API allowlist", () => {
-        expect(isPubkeyAllowed("ABCDEF", "abcdef")).toBe(true);
-    });
-
-    test("loads browser allowlist from public API config", async () => {
+    test("does not treat malformed public API config as allowed", async () => {
         const fetcher = async () =>
-            new Response(JSON.stringify({ allowed_pubkeys: [" abc ", "def"] }), {
+            new Response(JSON.stringify({ allowed_pubkeys: ["abc"] }), {
                 status: 200,
             });
 
-        await expect(fetchPubkeyAllowlist(fetcher)).resolves.toEqual(["abc", "def"]);
+        await expect(checkPubkeyAllowed("abc", fetcher)).resolves.toBe(false);
     });
 
-    test("fails closed when public API config cannot be loaded", async () => {
+    test("fails closed when public API config cannot be checked", async () => {
         const fetcher = async () => new Response("nope", { status: 503 });
 
-        await expect(fetchPubkeyAllowlist(fetcher)).rejects.toThrow("HTTP 503");
+        await expect(checkPubkeyAllowed("abc", fetcher)).rejects.toThrow("HTTP 503");
     });
 });

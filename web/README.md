@@ -24,8 +24,8 @@ The repo-level dev command runs this app through `bun run dev:web`.
   no protocol, the client assumes `https://`.
 - Production images default to the current browser origin and call `/api/*`, so the same image can run
   behind any domain where Caddy routes `/api/*` to the API.
-- The browser sign-in gate reads `/api/config`, which is generated from the API's `ALLOWED_PUBKEYS`
-  value. This is public config, not a secret; the API remains the security boundary.
+- The browser sign-in gate asks `/api/config?pubkey=<hex>` whether the current pubkey is allowed.
+  This does not expose the full API `ALLOWED_PUBKEYS` value; the API remains the security boundary.
 
 ## Auth Flow
 
@@ -42,11 +42,11 @@ authorization must stay server-side.
 ## Current Audit Notes
 
 - Keep NIP-98 request bodies and payload hashes in exact sync with the API request body.
-- The browser allowlist parser now uses exact pubkey matches from `/api/config`, but API enforcement
-  is the security boundary.
+- The browser allowlist check asks the API for a boolean decision for one pubkey at a time, but API
+  enforcement is the security boundary.
 - Create forms now prevent default browser submission before running async signing/API work.
 - Allowed-kinds policy forms now emit the same `allowed_kinds` config shape that Rust validates.
-- Permission parsing helpers are covered by `bun test`; keep route protection, allowlist parsing, and
+- Permission parsing helpers are covered by `bun test`; keep route protection, allowlist checks, and
   NIP-98 tag construction in pure helpers where possible.
 - Do not restore localStorage private-key sign-in without a fresh security review.
 - `bun test`, `bun run check`, `bun run build`, `bun audit`, `bun pm scan`, and `bun pm untrusted`
