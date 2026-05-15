@@ -1,4 +1,4 @@
-use super::auth_middleware;
+use super::{auth_middleware, public_config};
 use axum::{
     middleware,
     routing::{delete, get, post, put},
@@ -10,6 +10,12 @@ use crate::api::http::teams;
 
 pub fn routes(pool: SqlitePool) -> Router {
     tracing::debug!("Building routes");
+    Router::new()
+        .route("/config", get(public_config))
+        .merge(protected_routes(pool))
+}
+
+fn protected_routes(pool: SqlitePool) -> Router {
     Router::new()
         .route("/teams", get(teams::list_teams))
         .route("/teams", post(teams::create_team))

@@ -4,17 +4,26 @@ import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
 import type NDK from "@nostr-dev-kit/ndk";
 import { NDKNip07Signer, type NDKUser } from "@nostr-dev-kit/ndk";
 import toast from "svelte-hot-french-toast";
-import { isPubkeyAllowed } from "./allowlist";
+import { checkPubkeyAllowed } from "./allowlist";
 
-function isAllowedPubkey(pubkey: string) {
-    return isPubkeyAllowed(pubkey, import.meta.env.VITE_ALLOWED_PUBKEYS);
+async function isAllowedPubkey(pubkey: string) {
+    return checkPubkeyAllowed(pubkey);
 }
 
 export async function signin(ndk: NDK): Promise<NDKUser | null> {
     const signedInUser = await userFromNip07(ndk);
 
     if (signedInUser) {
-        if (!isAllowedPubkey(signedInUser.pubkey)) {
+        let allowed = false;
+        try {
+            allowed = await isAllowedPubkey(signedInUser.pubkey);
+        } catch (error) {
+            toast.error("Unable to verify pubkey authorization");
+            console.error(error);
+            return null;
+        }
+
+        if (!allowed) {
             toast.error("Your pubkey is not authorized");
             return null;
         }

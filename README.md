@@ -89,8 +89,9 @@ Create `.env` from `.env.example` for Docker/deployment settings:
 cp .env.example .env
 ```
 
-`ALLOWED_PUBKEYS` is enforced by the API for NIP-98-authenticated requests. `VITE_ALLOWED_PUBKEYS`
-is still public browser config and should only mirror the server allowlist for UI gating.
+`ALLOWED_PUBKEYS` is enforced by the API for NIP-98-authenticated requests. The API also exposes an
+unauthenticated `/api/config?pubkey=<hex>` check so the browser can ask whether the current pubkey is
+allowed without receiving the full server allowlist.
 
 ## Development
 
@@ -178,7 +179,8 @@ access control matter more than cosmetic cleanup.
 
 Docker deployment uses:
 
-- `docker-compose.yml` for API, web, and signer containers,
+- `docker-compose.yml` for local source builds of API, web, and signer containers,
+- `docker-compose.prod.yml` for pulling the published `ghcr.io/erskingardner/keycast` image,
 - `master.key` mounted into API and signer containers,
 - an external Docker network named `keycast`,
 - Caddy labels for routing `/api/*` to the API and the rest to the web app.
@@ -194,12 +196,18 @@ Initialize a server checkout:
 
 ```sh
 bash scripts/init.sh --domain keycast.example.com --allowed-pubkeys "hexpubkey1,hexpubkey2"
-sudo docker compose up -d --build
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
 ```
 
 `scripts/init.sh` writes `KEYCAST_UID` and `KEYCAST_GID` into `.env`, defaults them to the current
 user, and tries to set matching ownership on `database/` and `master.key`. Pass `--uid` and `--gid`
 if the container user should be different.
+
+Every push to `master` publishes one reusable image to GitHub Container Registry with `master`,
+`latest`, and `sha-<commit>` tags. Set `KEYCAST_IMAGE_TAG=sha-<commit>` in `.env` when you want a
+pin-and-roll-forward deployment instead of tracking the moving `master` tag. If GitHub creates the
+first package as private, change the package visibility to public in the GitHub Packages settings.
 
 For an existing deployment, do not use the blank-install flow blindly. Read [UPGRADE.md](UPGRADE.md),
 back up `database/keycast.db` and `master.key` together, verify the host `master.key` matches the

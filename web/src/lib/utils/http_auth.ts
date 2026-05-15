@@ -1,10 +1,21 @@
 export type HttpAuthMethod = "GET" | "POST" | "PUT" | "DELETE";
 
-export function normalizeApiBaseUrl(rawDomain: string | null | undefined): string {
-    const raw = String(rawDomain || "http://localhost:3000").trim();
-    const domain = /^https?:\/\//i.test(raw) ? raw : `https://${raw}`;
+export function normalizeApiBaseUrl(
+    rawDomain: string | null | undefined,
+    currentOrigin = runtimeOrigin(),
+): string {
+    const raw = String(rawDomain ?? "").trim();
+    const fallbackDomain = currentOrigin || "http://localhost:3000";
+    const configuredDomain = raw || fallbackDomain;
+    const domain = /^https?:\/\//i.test(configuredDomain)
+        ? configuredDomain
+        : `https://${configuredDomain}`;
 
     return `${domain.replace(/\/+$/, "")}/api`;
+}
+
+function runtimeOrigin(): string | undefined {
+    return typeof location === "undefined" ? undefined : location.origin;
 }
 
 export async function sha256Hex(body: string): Promise<string> {
