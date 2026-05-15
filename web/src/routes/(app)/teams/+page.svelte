@@ -120,13 +120,13 @@ async function createTeam(inline = false) {
 <div class="flex flex-col md:flex-row items-center justify-between mb-4">
     <h1 class="page-header mb-0! self-start md:self-center">Teams</h1>
     {#if inlineTeamFormVisible}
-        <form onsubmit={() => createTeam(true)} class="self-end md:self-center">
+        <form onsubmit={(event) => { event.preventDefault(); createTeam(true); }} class="self-end md:self-center">
             <div class="flex flex-row gap-2">
                 <input bind:this={inlineTeamNameInput} type="text" placeholder="Team name" bind:value={inlineTeamName} />
                 <button type="submit" class="button button-primary">
                     Create
                 </button>
-                <button onclick={toggleInlineTeamForm} class="button button-secondary">
+                <button type="button" onclick={toggleInlineTeamForm} class="button button-secondary">
                     Cancel
                 </button>
             </div>
@@ -157,7 +157,7 @@ async function createTeam(inline = false) {
             Create a team
         </button>
         {#if teamFormVisible}
-            <form onsubmit={() => createTeam()}>
+            <form onsubmit={(event) => { event.preventDefault(); createTeam(); }}>
                 <div class="flex flex-row gap-2">
                     <input bind:this={teamNameInput} type="text" placeholder="Team name" bind:value={newTeamName} />
                     <button type="submit" class="button button-primary">

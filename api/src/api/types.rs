@@ -1,16 +1,7 @@
-use serde::{Deserialize, Serialize};
-use sqlx::types::chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc};
+use serde::Deserialize;
 
-use keycast_core::types::team::Team;
 use keycast_core::types::user::TeamUserRole;
-
-#[derive(Debug, Serialize)]
-pub struct TeamResponse {
-    pub id: u32,
-    pub name: String,
-    pub created_at: DateTime<chrono::Utc>,
-    pub updated_at: DateTime<chrono::Utc>,
-}
 
 #[derive(Debug, Deserialize)]
 pub struct CreateTeamRequest {
@@ -55,15 +46,4 @@ pub struct AddAuthorizationRequest {
     #[serde(default)]
     #[serde(with = "chrono::serde::ts_seconds_option")]
     pub expires_at: Option<DateTime<Utc>>,
-}
-
-impl From<Team> for TeamResponse {
-    fn from(team: Team) -> Self {
-        Self {
-            id: team.id,
-            name: team.name,
-            created_at: team.created_at,
-            updated_at: team.updated_at,
-        }
-    }
 }

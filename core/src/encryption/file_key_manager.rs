@@ -1,11 +1,10 @@
 use super::{KeyManager, KeyManagerError};
 use aes_gcm::{
-    aead::{Aead, KeyInit},
+    aead::{rand_core::RngCore, Aead, KeyInit, OsRng},
     Aes256Gcm, Nonce,
 };
 use async_trait::async_trait;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use rand::Rng;
 use std::env;
 use std::path::PathBuf;
 
@@ -41,7 +40,8 @@ impl FileKeyManager {
 #[async_trait]
 impl KeyManager for FileKeyManager {
     async fn encrypt(&self, plaintext_bytes: &[u8]) -> Result<Vec<u8>, KeyManagerError> {
-        let nonce = rand::thread_rng().gen::<[u8; 12]>();
+        let mut nonce = [0_u8; 12];
+        OsRng.fill_bytes(&mut nonce);
         let nonce = Nonce::from_slice(&nonce);
 
         let ciphertext = self

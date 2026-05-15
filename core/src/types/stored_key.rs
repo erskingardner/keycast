@@ -2,7 +2,8 @@ use crate::encryption::KeyManagerError;
 use crate::types::user::UserError;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{from_row::FromRow, row::Row};
+use sqlx_sqlite::SqliteRow;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -27,7 +28,7 @@ pub enum KeyError {
 }
 
 /// A stored key is a key that has been stored in the database for a team
-#[derive(Debug, FromRow, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct StoredKey {
     /// The id of the stored key
     pub id: u32,
@@ -43,6 +44,20 @@ pub struct StoredKey {
     pub created_at: DateTime<chrono::Utc>,
     /// The date and time the key was last updated
     pub updated_at: DateTime<chrono::Utc>,
+}
+
+impl<'r> FromRow<'r, SqliteRow> for StoredKey {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            team_id: row.try_get("team_id")?,
+            name: row.try_get("name")?,
+            public_key: row.try_get("public_key")?,
+            secret_key: row.try_get("secret_key")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
 }
 
 /// A public representation of a stored key, without the secret key

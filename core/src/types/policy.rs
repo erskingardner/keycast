@@ -1,7 +1,8 @@
 use crate::types::permission::Permission;
 use chrono::DateTime;
 use serde::{Deserialize, Serialize};
-use sqlx::FromRow;
+use sqlx::{from_row::FromRow, row::Row};
+use sqlx_sqlite::SqliteRow;
 use thiserror::Error;
 
 #[derive(Error, Debug)]
@@ -14,7 +15,7 @@ pub enum PolicyError {
 }
 
 /// A policy is a set of permissions. Teams have many policies, and policies have many permissions.
-#[derive(Debug, FromRow, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Policy {
     /// The id of the policy
     pub id: u32,
@@ -28,11 +29,21 @@ pub struct Policy {
     pub updated_at: DateTime<chrono::Utc>,
 }
 
+impl<'r> FromRow<'r, SqliteRow> for Policy {
+    fn from_row(row: &'r SqliteRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            id: row.try_get("id")?,
+            name: row.try_get("name")?,
+            team_id: row.try_get("team_id")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    }
+}
+
 /// A policy with its permissions, this is a join table between a policy and its permissions
-#[derive(Debug, FromRow, Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct PolicyWithPermissions {
-    #[sqlx(flatten)]
     pub policy: Policy,
-    #[sqlx(default)]
     pub permissions: Vec<Permission>,
 }

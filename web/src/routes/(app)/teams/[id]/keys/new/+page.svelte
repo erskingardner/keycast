@@ -29,14 +29,16 @@ async function createKey() {
         return;
     }
 
+    const request = {
+        name: keyName,
+        secret_key: secretKey,
+    };
+
     api.buildUnsignedAuthEvent(
         `/teams/${id}/keys`,
         "POST",
         user.pubkey,
-        JSON.stringify({
-            key_name: keyName,
-            secret_key: secretKey,
-        }),
+        JSON.stringify(request),
     ).then(async (event) => {
         unsignedAuthEvent = event;
         if (unsignedAuthEvent) {
@@ -47,7 +49,7 @@ async function createKey() {
             const encodedAuthEvent = `Nostr ${btoa(JSON.stringify(unsignedAuthEvent))}`;
             api.post<StoredKey>(
                 `/teams/${id}/keys`,
-                { name: keyName, secret_key: secretKey },
+                request,
                 {
                     headers: { Authorization: encodedAuthEvent },
                 },
@@ -67,7 +69,7 @@ async function createKey() {
 
 <h1 class="page-header">Add Key</h1>
 
-<form onsubmit={() => createKey()}>
+<form onsubmit={(event) => { event.preventDefault(); createKey(); }}>
     <div class="form-group">
   <label for="keyName">Key Name</label>
         <input type="text" bind:value={keyName} />

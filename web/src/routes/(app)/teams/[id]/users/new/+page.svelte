@@ -75,7 +75,7 @@ async function addTeammate() {
 
 <h1 class="page-header">Add Teammate</h1>
 
-<form onsubmit={() => addTeammate()}>
+<form onsubmit={(event) => { event.preventDefault(); addTeammate(); }}>
     <div class="form-group">
         <label for="pubkey">Public key or npub</label>
         <input type="text" bind:value={pubkeyOrNpub} placeholder="npub1..." />

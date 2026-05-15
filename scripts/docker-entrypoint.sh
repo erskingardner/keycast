@@ -25,14 +25,8 @@ if [ "$1" = "api" ]; then
     exec ./keycast_api
 elif [ "$1" = "web" ]; then
     # Check for API using api service name instead of localhost
-    if [ ! -z "$WAIT_FOR_API" ]; then
-        echo "WAIT_FOR_API is set, checking network..."
-        # Debug: Check network connectivity
-        echo "Network status:"
-        ip addr
-        echo "DNS resolution:"
-        getent hosts keycast-api || echo "Could not resolve keycast-api hostname"
-        echo "Attempting to reach API..."
+    if [ -n "$WAIT_FOR_API" ]; then
+        echo "WAIT_FOR_API is set, waiting for API..."
         wait_for_port keycast-api 3000
     fi
     echo "Starting web server..."

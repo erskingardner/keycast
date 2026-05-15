@@ -7,6 +7,7 @@ use nostr_sdk::{PublicKey, UnsignedEvent};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct EncryptToSelfConfig {}
 
 pub struct EncryptToSelf {}
@@ -14,8 +15,11 @@ pub struct EncryptToSelf {}
 #[async_trait]
 impl CustomPermission for EncryptToSelf {
     fn from_permission(
-        _permission: &Permission,
+        permission: &Permission,
     ) -> Result<Box<dyn CustomPermission>, PermissionError> {
+        let _parsed_config: EncryptToSelfConfig = serde_json::from_value(permission.config.clone())
+            .map_err(|e| PermissionError::InvalidConfig(e.to_string()))?;
+
         Ok(Box::new(Self {}))
     }
 
@@ -44,5 +48,41 @@ impl CustomPermission for EncryptToSelf {
         recipient_pubkey: &PublicKey,
     ) -> bool {
         *sender_pubkey == *recipient_pubkey
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn permission(config: serde_json::Value) -> Permission {
+        Permission {
+            id: 0,
+            identifier: "encrypt_to_self".to_string(),
+            config,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_config_fields() {
+        assert!(
+            EncryptToSelf::from_permission(&permission(serde_json::json!({
+                "ignored": true
+            })))
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn allows_only_same_sender_and_recipient_for_encryption() {
+        let permission =
+            EncryptToSelf::from_permission(&permission(serde_json::json!({}))).unwrap();
+        let sender = nostr_sdk::Keys::generate().public_key();
+        let recipient = nostr_sdk::Keys::generate().public_key();
+
+        assert!(permission.can_encrypt("hello", &sender, &sender));
+        assert!(!permission.can_encrypt("hello", &sender, &recipient));
     }
 }

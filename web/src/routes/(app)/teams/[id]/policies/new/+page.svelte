@@ -90,7 +90,7 @@ async function addPermission() {
     Add Policy
 </h1>
 
-<form class="flex flex-col gap-4">
+<form onsubmit={(event) => { event.preventDefault(); createPolicy(); }} class="flex flex-col gap-4">
     <div class="form-group">
         <label for="policyName">Policy name</label>
         <input type="text" id="policyName" bind:value={policyName} placeholder="My policy..." />
@@ -108,8 +108,8 @@ async function addPermission() {
     </PageSection>
     <PageSection title="Add a new permission">
         <PermissionForm bind:identifier bind:config />
-        <button onclick={addPermission} class="button button-secondary self-start mt-6 mb-6">Add permission</button>
+        <button type="button" onclick={addPermission} class="button button-secondary self-start mt-6 mb-6">Add permission</button>
     </PageSection>
 
-    <button onclick={createPolicy} class="button button-primary self-start">Save Policy</button>
+    <button type="submit" class="button button-primary self-start">Save Policy</button>
 </form>

@@ -3,11 +3,9 @@ import type { NDKCacheAdapter } from "@nostr-dev-kit/ndk";
 import NDK from "@nostr-dev-kit/ndk";
 import NDKCacheAdapterDexie from "@nostr-dev-kit/ndk-cache-dexie";
 
-let cacheAdapter: NDKCacheAdapter | undefined = $state(undefined);
-
-if (browser) {
-    cacheAdapter = new NDKCacheAdapterDexie({ dbName: "keycast" });
-}
+const cacheAdapter: NDKCacheAdapter | undefined = browser
+    ? new NDKCacheAdapterDexie({ dbName: "keycast" })
+    : undefined;
 
 export const ndkStore = new NDK({
     explicitRelayUrls: [

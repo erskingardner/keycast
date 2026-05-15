@@ -7,14 +7,25 @@ let {
     extraClasses,
 }: { user: NDKUser; userProfile?: NDKUserProfile; extraClasses: string } = $props();
 
-let profile: NDKUserProfile | null | undefined = $state(userProfile || user.profile);
+let profile = $state<NDKUserProfile | null | undefined>(null);
 
 $effect(() => {
-    if (!profile) {
-        user.fetchProfile().then((userProfile) => {
-            profile = userProfile;
-        });
+    const currentProfile = userProfile || user.profile;
+    if (currentProfile) {
+        profile = currentProfile;
+        return;
     }
+
+    let cancelled = false;
+    user.fetchProfile().then((fetchedProfile) => {
+        if (!cancelled) {
+            profile = fetchedProfile;
+        }
+    });
+
+    return () => {
+        cancelled = true;
+    };
 });
 </script>
 
@@ -23,4 +34,3 @@ $effect(() => {
 {:else}
     <img src="https://robohash.org/{user.pubkey}" alt="No-Avatar" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
 {/if}
-    

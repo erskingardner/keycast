@@ -1,18 +1,18 @@
 import { NDKEvent, NDKKind } from "@nostr-dev-kit/ndk";
 import { getContext, setContext } from "svelte";
 import ndk from "./ndk.svelte";
+import {
+    buildNip98Tags,
+    normalizeApiBaseUrl,
+    type HttpAuthMethod,
+} from "./utils/http_auth";
 
 export class KeycastApi {
     private baseUrl: string;
     private defaultHeaders: HeadersInit;
 
     constructor() {
-        const apiDomain =
-            import.meta.env.VITE_DOMAIN || "http://localhost:3000";
-        const domain = apiDomain.startsWith("http")
-            ? apiDomain
-            : `https://${apiDomain}`;
-        this.baseUrl = `${domain}/api`;
+        this.baseUrl = normalizeApiBaseUrl(import.meta.env.VITE_DOMAIN);
         console.log("Constructor baseUrl:", this.baseUrl);
         this.defaultHeaders = {
             "Content-Type": "application/json",
@@ -90,35 +90,18 @@ export class KeycastApi {
 
     async buildUnsignedAuthEvent(
         url: string,
-        method: "GET" | "POST" | "PUT" | "DELETE",
+        method: HttpAuthMethod,
         pubkey: string,
         body?: string,
     ): Promise<NDKEvent | null> {
+        const tags = await buildNip98Tags(this.baseUrl, url, method, body);
         const authEvent: NDKEvent = new NDKEvent(ndk, {
             content: "",
             kind: NDKKind.HttpAuth,
             pubkey,
             created_at: Math.floor(Date.now() / 1000),
-            tags: [
-                ["u", `${this.baseUrl}${url}`],
-                ["method", `${method}`],
-            ],
+            tags,
         });
-
-        let hashedPayload: string | undefined = undefined;
-        if (body) {
-            const buffer = await crypto.subtle.digest(
-                "SHA-256",
-                new TextEncoder().encode(body),
-            );
-            hashedPayload = Array.from(new Uint8Array(buffer))
-                .map((b) => b.toString(16).padStart(2, "0"))
-                .join("");
-        }
-
-        if (hashedPayload) {
-            authEvent.tags.push(["payload", hashedPayload]);
-        }
 
         return authEvent;
     }

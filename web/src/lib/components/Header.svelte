@@ -2,7 +2,7 @@
 import { page } from "$app/stores";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import ndk from "$lib/ndk.svelte";
-import { SigninMethod, signin, signout } from "$lib/utils/auth";
+import { signin, signout } from "$lib/utils/auth";
 import { Key, SignIn, SignOut } from "phosphor-svelte";
 
 const user = $derived(getCurrentUser()?.user);
@@ -35,7 +35,7 @@ const activePage = $derived($page.url.pathname);
             </button>
         {:else}
             <button
-                onclick={() => signin(ndk, undefined, SigninMethod.Nip07)}
+                onclick={() => signin(ndk)}
                 class="button button-primary button-icon"
             >
                 <SignIn size="20" />

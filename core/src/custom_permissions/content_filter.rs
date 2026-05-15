@@ -7,6 +7,7 @@ use nostr_sdk::{PublicKey, UnsignedEvent};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ContentFilterConfig {
     pub blocked_words: Option<Vec<String>>,
 }
@@ -33,10 +34,9 @@ impl CustomPermission for ContentFilter {
     }
 
     fn can_sign(&self, event: &UnsignedEvent) -> bool {
-        match &self.config.blocked_words {
-            None => true,
-            Some(words) => !words.iter().any(|word| event.content.contains(word)),
-        }
+        !self
+            .blocked_words()
+            .any(|word| event.content.contains(word))
     }
 
     fn can_encrypt(
@@ -45,10 +45,7 @@ impl CustomPermission for ContentFilter {
         _sender_pubkey: &PublicKey,
         _recipient_pubkey: &PublicKey,
     ) -> bool {
-        match &self.config.blocked_words {
-            None => true,
-            Some(words) => !words.iter().any(|word| plaintext.contains(word)),
-        }
+        !self.blocked_words().any(|word| plaintext.contains(word))
     }
 
     // We can't know what is in the content of the event, so we always allow decryption
@@ -62,8 +59,48 @@ impl CustomPermission for ContentFilter {
     }
 }
 
+impl ContentFilter {
+    fn blocked_words(&self) -> impl Iterator<Item = &str> {
+        self.config
+            .blocked_words
+            .iter()
+            .flatten()
+            .map(String::as_str)
+            .map(str::trim)
+            .filter(|word| !word.is_empty())
+    }
+}
+
 #[test]
 fn test_default() {
     let config = ContentFilterConfig::default();
     assert!(config.blocked_words.is_none());
+}
+
+#[test]
+fn rejects_unknown_config_fields() {
+    let invalid = serde_json::json!({
+        "blocked_words": ["secret"],
+        "ignored": true
+    });
+
+    assert!(serde_json::from_value::<ContentFilterConfig>(invalid).is_err());
+}
+
+#[test]
+fn ignores_empty_blocked_words() {
+    let permission = Permission {
+        id: 0,
+        identifier: "content_filter".to_string(),
+        config: serde_json::json!({"blocked_words": ["", "  "]}),
+        created_at: chrono::Utc::now(),
+        updated_at: chrono::Utc::now(),
+    };
+    let filter = ContentFilter::from_permission(&permission).unwrap();
+    let keys = nostr_sdk::Keys::generate();
+    let event =
+        nostr_sdk::EventBuilder::new(nostr_sdk::Kind::TextNote, "hello").build(keys.public_key());
+
+    assert!(filter.can_sign(&event));
+    assert!(filter.can_encrypt("hello", &keys.public_key(), &keys.public_key()));
 }
