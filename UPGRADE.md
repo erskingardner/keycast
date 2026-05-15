@@ -14,13 +14,27 @@ install path.
 
 ## Before You Deploy
 
-1. Make a cold backup of both files:
+1. Stop the running containers and make a cold backup of the database and key. SQLite runs in WAL
+   mode, so prefer SQLite's backup command when `sqlite3` is available:
 
 ```sh
 mkdir -p backups
+ts="$(date +%Y%m%d-%H%M%S)"
 docker compose stop keycast-api keycast-signer keycast-web
-cp database/keycast.db "backups/keycast.$(date +%Y%m%d-%H%M%S).db"
-cp master.key "backups/master.$(date +%Y%m%d-%H%M%S).key"
+sqlite3 database/keycast.db ".backup 'backups/keycast.${ts}.db'"
+cp master.key "backups/master.${ts}.key"
+```
+
+If `sqlite3` is not available on the host, copy the database sidecar files too when they exist:
+
+```sh
+mkdir -p backups
+ts="$(date +%Y%m%d-%H%M%S)"
+docker compose stop keycast-api keycast-signer keycast-web
+cp database/keycast.db "backups/keycast.${ts}.db"
+[ ! -f database/keycast.db-wal ] || cp database/keycast.db-wal "backups/keycast.${ts}.db-wal"
+[ ! -f database/keycast.db-shm ] || cp database/keycast.db-shm "backups/keycast.${ts}.db-shm"
+cp master.key "backups/master.${ts}.key"
 ```
 
 2. Do not generate a new `master.key` for an existing install. If the host file is missing but the old
