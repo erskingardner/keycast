@@ -56,7 +56,7 @@ let contentFilterConfig: ContentFilterConfig = $state({
             Which event kinds are allowed
             <Tooltip content="Enter the allowed kinds as a comma separated list. Blank allows all event kinds. e.g. 1, 7, 10002." size={18} />
         </h3>
-        <a href="https://github.com/nostr-protocol/nips?tab=readme-ov-file#event-kinds" target="_blank" class="text-xs text-gray-400 border-b border-gray-400 border-dashed hover:border-solid mb-4 inline-block">List of event kinds</a>
+        <a href="https://github.com/nostr-protocol/nips?tab=readme-ov-file#event-kinds" target="_blank" rel="noreferrer" class="text-xs text-gray-400 border-b border-gray-400 border-dashed hover:border-solid mb-4 inline-block">List of event kinds</a>
         <div class="flex flex-col gap-2 w-full">
             <div class="grid grid-cols-[auto_1fr] items-center gap-2 w-full">
                 <label class="text-base font-medium my-0! py-0!" for="allowedKinds">Kinds</label>

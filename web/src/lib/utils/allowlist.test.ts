@@ -13,7 +13,7 @@ describe("pubkey allowlist helpers", () => {
 
         await expect(checkPubkeyAllowed("ABC 123", fetcher)).resolves.toBe(true);
         expect(requestedUrls).toEqual([
-            "http://localhost:3000/api/config?pubkey=ABC+123",
+            "http://localhost:3100/api/config?pubkey=ABC+123",
         ]);
     });
 

@@ -6,13 +6,11 @@ import PermissionCard from "$lib/components/PermissionCard.svelte";
 import PermissionForm from "$lib/components/PermissionForm.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import ndk from "$lib/ndk.svelte";
 import type {
     AllowedKindsConfig,
     ContentFilterConfig,
     Permission,
 } from "$lib/types";
-import { NDKNip07Signer } from "@nostr-dev-kit/ndk";
 import { toast } from "svelte-hot-french-toast";
 
 const { id } = $page.params;
@@ -46,22 +44,16 @@ async function createPolicy() {
         permissions,
     };
 
-    const authEvent = await api.buildUnsignedAuthEvent(
+    const authHeader = await api.buildAuthHeader(
         `/teams/${id}/policies`,
         "POST",
         user?.pubkey,
         JSON.stringify(request),
     );
 
-    if (!ndk.signer) {
-        ndk.signer = new NDKNip07Signer();
-    }
-
-    await authEvent?.sign();
-
     api.post(`/teams/${id}/policies`, request, {
         headers: {
-            Authorization: `Nostr ${btoa(JSON.stringify(authEvent))}`,
+            Authorization: authHeader,
         },
     })
         .then((policy) => {

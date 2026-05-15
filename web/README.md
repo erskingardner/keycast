@@ -22,6 +22,8 @@ The repo-level dev command runs this app through `bun run dev:web`.
 
 - `VITE_DOMAIN` is optional for local development when the API is not on the same origin. If it has
   no protocol, the client assumes `https://`.
+- The repo-level local dev command points the web app at `http://localhost:3100/api` to avoid common
+  local services on port `3000`.
 - Production images default to the current browser origin and call `/api/*`, so the same image can run
   behind any domain where Caddy routes `/api/*` to the API.
 - The browser sign-in gate asks `/api/config?pubkey=<hex>` whether the current pubkey is allowed.
@@ -30,11 +32,13 @@ The repo-level dev command runs this app through `bun run dev:web`.
 ## Auth Flow
 
 Sign-in uses the raw NIP-07 browser extension API to fetch the active pubkey. The app then uses
-NDK's NIP-07 signer for NIP-98 event signing. `nostr-login` is no longer part of the auth path.
+Applesauce's extension signer for NIP-98 event signing. `nostr-login` and NDK are no longer part of
+the auth path.
 
-`src/lib/keycast_api.svelte.ts` builds unsigned NIP-98 events with `u`, `method`, and optional
-`payload` tags. Route pages sign those events with NIP-07 and send the base64-encoded event in the
-`Authorization` header.
+`src/lib/keycast_api.svelte.ts` builds NIP-98 events with `u`, `method`, and optional `payload` tags,
+signs them with NIP-07 through Applesauce, and sends the base64-encoded event in the
+`Authorization` header. `src/lib/nostr.ts` owns browser signer access and public profile/contact
+reads through Applesauce's event store and relay pool.
 
 The cookie named `keycastUserPubkey` is only a UI route hint. It is not proof of authorization. API
 authorization must stay server-side.

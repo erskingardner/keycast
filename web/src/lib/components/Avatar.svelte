@@ -1,23 +1,26 @@
 <script lang="ts">
-import type { NDKUser, NDKUserProfile } from "@nostr-dev-kit/ndk";
+import { loadProfile, type NostrProfile } from "$lib/nostr";
+import { safeRemoteImageUrl } from "$lib/utils/image_url";
 
 let {
-    user,
+    pubkey,
     userProfile,
     extraClasses,
-}: { user: NDKUser; userProfile?: NDKUserProfile; extraClasses: string } = $props();
+}: { pubkey: string; userProfile?: NostrProfile | null; extraClasses: string } = $props();
 
-let profile = $state<NDKUserProfile | null | undefined>(null);
+let profile = $state<NostrProfile | null | undefined>(null);
+let imageUrl = $derived(safeRemoteImageUrl(profile?.picture || profile?.image));
+let fallbackImageUrl = $derived(`https://robohash.org/${encodeURIComponent(pubkey)}`);
 
 $effect(() => {
-    const currentProfile = userProfile || user.profile;
+    const currentProfile = userProfile;
     if (currentProfile) {
         profile = currentProfile;
         return;
     }
 
     let cancelled = false;
-    user.fetchProfile().then((fetchedProfile) => {
+    loadProfile(pubkey).then((fetchedProfile) => {
         if (!cancelled) {
             profile = fetchedProfile;
         }
@@ -29,8 +32,8 @@ $effect(() => {
 });
 </script>
 
-{#if profile?.image}
-    <img src={profile.image as string} alt="Avatar" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
+{#if imageUrl}
+    <img src={imageUrl} alt="Avatar" referrerpolicy="no-referrer" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
 {:else}
-    <img src="https://robohash.org/{user.pubkey}" alt="No-Avatar" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
+    <img src={fallbackImageUrl} alt="No-Avatar" referrerpolicy="no-referrer" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
 {/if}

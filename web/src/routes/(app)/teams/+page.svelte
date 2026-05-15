@@ -3,17 +3,14 @@ import Loader from "$lib/components/Loader.svelte";
 import TeamCard from "$lib/components/TeamCard.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import ndk from "$lib/ndk.svelte.js";
 import type { TeamWithRelations } from "$lib/types";
-import { type NDKEvent, NDKNip07Signer } from "@nostr-dev-kit/ndk";
 import { PlusCircle } from "phosphor-svelte";
 import { toast } from "svelte-hot-french-toast";
 
 const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 let isLoading = $state(true);
-let unsignedAuthEvent: NDKEvent | null = $state(null);
-let encodedAuthEvent: string | null = $state(null);
+let teamsAuthHeader: string | null = $state(null);
 let teams: TeamWithRelations[] | null = $state(null);
 let teamFormVisible = $state(false);
 let newTeamName = $state("");
@@ -26,31 +23,23 @@ let inlineTeamError: string | null = $state(null);
 let inlineTeamName = $state("");
 
 $effect(() => {
-    if (user?.pubkey && !unsignedAuthEvent) {
-        api.buildUnsignedAuthEvent("/teams", "GET", user.pubkey).then(
-            async (event) => {
-                unsignedAuthEvent = event;
-                if (unsignedAuthEvent) {
-                    if (!ndk.signer) {
-                        ndk.signer = new NDKNip07Signer();
-                    }
-                    await unsignedAuthEvent.sign();
-                    encodedAuthEvent = `Nostr ${btoa(JSON.stringify(unsignedAuthEvent))}`;
-                    api.get("/teams", {
-                        headers: { Authorization: encodedAuthEvent },
-                    })
-                        .then((teamsResponse) => {
-                            teams = teamsResponse as TeamWithRelations[];
-                        })
-                        .catch((error) => {
-                            console.error(error);
-                        })
-                        .finally(() => {
-                            isLoading = false;
-                        });
-                }
-            },
-        );
+    if (user?.pubkey && !teamsAuthHeader) {
+        api.buildAuthHeader("/teams", "GET", user.pubkey)
+            .then((authHeader) => {
+                teamsAuthHeader = authHeader;
+                return api.get("/teams", {
+                    headers: { Authorization: authHeader },
+                });
+            })
+            .then((teamsResponse) => {
+                teams = teamsResponse as TeamWithRelations[];
+            })
+            .catch((error) => {
+                console.error(error);
+            })
+            .finally(() => {
+                isLoading = false;
+            });
     }
 });
 
@@ -73,27 +62,23 @@ async function createTeam(inline = false) {
 
     const name = inline ? inlineTeamName : newTeamName;
 
-    const authEvent = await api.buildUnsignedAuthEvent(
+    const authHeader = await api.buildAuthHeader(
         "/teams",
         "POST",
         user?.pubkey,
         JSON.stringify({ name }),
     );
-    if (!ndk.signer) {
-        ndk.signer = new NDKNip07Signer();
-    }
-    await authEvent?.sign();
     api.post<TeamWithRelations>(
         "/teams",
         { name },
         {
             headers: {
-                Authorization: `Nostr ${btoa(JSON.stringify(authEvent))}`,
+                Authorization: authHeader,
             },
         },
     )
         .then((newTeam) => {
-            teams?.push(newTeam);
+            teams = [...(teams ?? []), newTeam];
             newTeamName = "";
             inlineTeamName = "";
             if (inline) {

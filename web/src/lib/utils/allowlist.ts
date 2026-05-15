@@ -29,7 +29,7 @@ export async function checkPubkeyAllowed(
 function defaultApiBaseUrl(): string {
     const configuredDomain =
         import.meta.env.VITE_DOMAIN ||
-        (import.meta.env.DEV ? "http://localhost:3000" : undefined);
+        (import.meta.env.DEV ? "http://localhost:3100" : undefined);
 
     return normalizeApiBaseUrl(configuredDomain);
 }

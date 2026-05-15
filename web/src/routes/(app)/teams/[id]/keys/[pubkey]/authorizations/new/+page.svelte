@@ -4,7 +4,6 @@ import { page } from "$app/stores";
 import PageSection from "$lib/components/PageSection.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import ndk from "$lib/ndk.svelte";
 import type {
     PolicyWithPermissions,
     StoredKey,
@@ -12,8 +11,8 @@ import type {
     TeamWithRelations,
 } from "$lib/types";
 import { readablePermissionConfig } from "$lib/utils/permissions";
+import { parseRelayInput, relayListForInput } from "$lib/utils/relays";
 import { toTitleCase } from "$lib/utils/strings";
-import { type NDKEvent, NDKNip07Signer } from "@nostr-dev-kit/ndk";
 import { CaretRight, X } from "phosphor-svelte";
 import { toast } from "svelte-hot-french-toast";
 
@@ -22,18 +21,13 @@ const { id, pubkey } = $page.params;
 const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 let isLoading = $state(true);
-let unsignedAuthEvent: NDKEvent | null = $state(null);
-let encodedAuthEvent: string | null = $state(null);
+let teamAuthHeader: string | null = $state(null);
 
 let maxUses: number | null = $state(0);
 let expiresAt: Date | null = $state(null);
-let relaysString: string = $state(
-    "wss://relay.nsecbunker.com, wss://relay.nsec.app",
-);
+let relaysString: string = $state(relayListForInput());
 
-let relays: string[] = $derived(
-    relaysString.split(",").map((relay) => relay.trim()),
-);
+let relays: string[] = $derived(parseRelayInput(relaysString));
 
 let teamWithRelations: TeamWithRelations | null = $state(null);
 let team: Team | null = $state(null);
@@ -46,34 +40,26 @@ let readyToSubmit = $derived(
 );
 
 $effect(() => {
-    if (user?.pubkey && !unsignedAuthEvent) {
-        api.buildUnsignedAuthEvent(`/teams/${id}`, "GET", user.pubkey).then(
-            async (event) => {
-                unsignedAuthEvent = event;
-                if (unsignedAuthEvent) {
-                    if (!ndk.signer) {
-                        ndk.signer = new NDKNip07Signer();
-                    }
-                    await unsignedAuthEvent.sign();
-                    encodedAuthEvent = `Nostr ${btoa(JSON.stringify(unsignedAuthEvent))}`;
-                    api.get(`/teams/${id}`, {
-                        headers: { Authorization: encodedAuthEvent },
-                    })
-                        .then((teamResponse) => {
-                            teamWithRelations =
-                                teamResponse as TeamWithRelations;
-                            team = teamWithRelations.team;
-                            key = teamWithRelations.stored_keys.find(
-                                (key) => key.public_key === pubkey,
-                            );
-                            policies = teamWithRelations.policies;
-                        })
-                        .finally(() => {
-                            isLoading = false;
-                        });
-                }
-            },
-        );
+    if (user?.pubkey && !teamAuthHeader) {
+        api.buildAuthHeader(`/teams/${id}`, "GET", user.pubkey)
+            .then((authHeader) => {
+                teamAuthHeader = authHeader;
+                return api.get(`/teams/${id}`, {
+                    headers: { Authorization: authHeader },
+                });
+            })
+            .then((teamResponse) => {
+                teamWithRelations =
+                    teamResponse as TeamWithRelations;
+                team = teamWithRelations.team;
+                key = teamWithRelations.stored_keys.find(
+                    (key) => key.public_key === pubkey,
+                );
+                policies = teamWithRelations.policies;
+            })
+            .finally(() => {
+                isLoading = false;
+            });
     }
 });
 
@@ -102,22 +88,16 @@ async function createAuthorization() {
         policy_id: selectedPolicyId,
     };
 
-    const authEvent = await api.buildUnsignedAuthEvent(
+    const authHeader = await api.buildAuthHeader(
         `/teams/${id}/keys/${pubkey}/authorizations`,
         "POST",
         user?.pubkey,
         JSON.stringify(request),
     );
 
-    if (!ndk.signer) {
-        ndk.signer = new NDKNip07Signer();
-    }
-
-    await authEvent?.sign();
-
     api.post(`/teams/${id}/keys/${pubkey}/authorizations`, request, {
         headers: {
-            Authorization: `Nostr ${btoa(JSON.stringify(authEvent))}`,
+            Authorization: authHeader,
         },
     })
         .then((_authorization) => {
