@@ -12,8 +12,10 @@ export class KeycastApi {
     private defaultHeaders: HeadersInit;
 
     constructor() {
-        this.baseUrl = normalizeApiBaseUrl(import.meta.env.VITE_DOMAIN);
-        console.log("Constructor baseUrl:", this.baseUrl);
+        const configuredDomain =
+            import.meta.env.VITE_DOMAIN ||
+            (import.meta.env.DEV ? "http://localhost:3000" : undefined);
+        this.baseUrl = normalizeApiBaseUrl(configuredDomain);
         this.defaultHeaders = {
             "Content-Type": "application/json",
             Accept: "application/json",
@@ -25,7 +27,6 @@ export class KeycastApi {
         options: RequestInit = {},
     ): Promise<T> {
         const url = `${this.baseUrl}${endpoint}`;
-        console.log("Making request to:", url);
         const headers = { ...this.defaultHeaders, ...options.headers };
 
         const response = await fetch(url, { ...options, headers });

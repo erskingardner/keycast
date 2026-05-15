@@ -20,10 +20,12 @@ The repo-level dev command runs this app through `bun run dev:web`.
 
 ## Environment
 
-- `VITE_DOMAIN` points the browser client at the API host. If it has no protocol, the client assumes
-  `https://`.
-- `VITE_ALLOWED_PUBKEYS` is public browser config. It is not a secret. Keep it in sync with the API's
-  `ALLOWED_PUBKEYS` value if you want the browser to hide the UI for non-allowlisted pubkeys.
+- `VITE_DOMAIN` is optional for local development when the API is not on the same origin. If it has
+  no protocol, the client assumes `https://`.
+- Production images default to the current browser origin and call `/api/*`, so the same image can run
+  behind any domain where Caddy routes `/api/*` to the API.
+- The browser sign-in gate reads `/api/config`, which is generated from the API's `ALLOWED_PUBKEYS`
+  value. This is public config, not a secret; the API remains the security boundary.
 
 ## Auth Flow
 
@@ -40,8 +42,8 @@ authorization must stay server-side.
 ## Current Audit Notes
 
 - Keep NIP-98 request bodies and payload hashes in exact sync with the API request body.
-- The browser allowlist parser now uses exact comma-separated pubkey matches, but API enforcement is the
-  security boundary.
+- The browser allowlist parser now uses exact pubkey matches from `/api/config`, but API enforcement
+  is the security boundary.
 - Create forms now prevent default browser submission before running async signing/API work.
 - Allowed-kinds policy forms now emit the same `allowed_kinds` config shape that Rust validates.
 - Permission parsing helpers are covered by `bun test`; keep route protection, allowlist parsing, and

@@ -8,6 +8,8 @@ install path.
 - Containers now run as a non-root user and use a read-only root filesystem.
 - `master.key` is mounted from the host instead of being copied into the image.
 - `ALLOWED_PUBKEYS` is enforced by the API, not just the browser.
+- `docker-compose.prod.yml` can pull the published `ghcr.io/erskingardner/keycast` image instead of
+  building Rust and Bun on the server.
 - The Nostr Rust stack moved to current crates.io releases.
 - Migration `0002_normalize_allowed_kinds_permissions.sql` normalizes old `allowed_kinds` permission
   JSON from `{"sign":[...]}` to `{"allowed_kinds":[...]}`.
@@ -68,21 +70,24 @@ directory at startup.
 ## Deploy
 
 ```sh
-docker compose build
-docker compose up -d
-docker compose ps
+docker compose -f docker-compose.prod.yml pull
+docker compose -f docker-compose.prod.yml up -d
+docker compose -f docker-compose.prod.yml ps
 ```
 
 The API and signer run SQLx migrations on startup. The new migration only normalizes old permission
 JSON. It does not rotate keys, change stored-key ciphertext, or invalidate existing bunker connection
 strings.
 
+By default, production Compose tracks the moving `master` tag. To pin a specific build, set
+`KEYCAST_IMAGE_TAG=sha-<commit>` in `.env`, then run the same pull and up commands.
+
 ## Verify
 
 ```sh
 curl -f https://your-domain.example/health
 curl -f https://your-domain.example/api/health
-docker compose logs --tail=100 keycast-api keycast-signer keycast-web
+docker compose -f docker-compose.prod.yml logs --tail=100 keycast-api keycast-signer keycast-web
 ```
 
 Then sign in with an allowlisted pubkey, open an existing team, inspect an existing policy, and test
@@ -95,10 +100,10 @@ If you need to roll back code after migration `0002` has run, restore the databa
 application may not understand the normalized `allowed_kinds` JSON.
 
 ```sh
-docker compose down
+docker compose -f docker-compose.prod.yml down
 cp backups/keycast.YYYYMMDD-HHMMSS.db database/keycast.db
 cp backups/master.YYYYMMDD-HHMMSS.key master.key
-docker compose up -d --build
+KEYCAST_IMAGE_TAG=sha-previous docker compose -f docker-compose.prod.yml up -d
 ```
 
 Do not roll back with a different `master.key`; stored private keys and bunker keys will not decrypt.

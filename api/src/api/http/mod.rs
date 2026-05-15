@@ -6,11 +6,13 @@ use axum::{
     http::{Request, StatusCode},
     middleware::Next,
     response::Response,
+    Json,
 };
 pub use routes::*;
 
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use nostr_sdk::prelude::*;
+use serde::Serialize;
 use std::env;
 use thiserror::Error;
 
@@ -19,6 +21,11 @@ pub const AUTHORIZATION_HEADER: &str = "Authorization";
 const AUTH_EVENT_MAX_AGE_SECONDS: i64 = 60;
 const AUTH_EVENT_MAX_FUTURE_SKEW_SECONDS: i64 = 60;
 const MAX_AUTH_BODY_BYTES: usize = 1024 * 1024;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct PublicConfig {
+    pub allowed_pubkeys: Vec<String>,
+}
 
 #[derive(Debug, Error)]
 pub enum AuthenticationError {
@@ -76,6 +83,12 @@ pub async fn auth_middleware(request: Request<Body>, next: Next) -> Response {
     };
 
     next.run(request).await
+}
+
+pub async fn public_config() -> Json<PublicConfig> {
+    Json(PublicConfig {
+        allowed_pubkeys: configured_allowed_pubkeys(),
+    })
 }
 
 fn response_with_status(status: StatusCode, message: &'static str) -> Response {
@@ -293,20 +306,32 @@ fn validate_payload_tag(event: &Event, body: &[u8]) -> Result<(), Authentication
 }
 
 fn is_allowed_pubkey(pubkey: &PublicKey) -> bool {
-    let allowed_pubkeys = env::var("ALLOWED_PUBKEYS")
-        .or_else(|_| env::var("VITE_ALLOWED_PUBKEYS"))
-        .unwrap_or_default();
-
-    if allowed_pubkeys.trim().is_empty() {
+    let allowed_pubkeys = configured_allowed_pubkeys();
+    if allowed_pubkeys.is_empty() {
         return true;
     }
 
     let pubkey_hex = pubkey.to_hex();
     allowed_pubkeys
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(&pubkey_hex))
+}
+
+fn configured_allowed_pubkeys() -> Vec<String> {
+    let allowed_pubkeys = env::var("ALLOWED_PUBKEYS")
+        .or_else(|_| env::var("VITE_ALLOWED_PUBKEYS"))
+        .unwrap_or_default();
+
+    parse_allowed_pubkeys(&allowed_pubkeys)
+}
+
+fn parse_allowed_pubkeys(raw_allowlist: &str) -> Vec<String> {
+    raw_allowlist
         .split(',')
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .any(|allowed| allowed.eq_ignore_ascii_case(&pubkey_hex))
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 #[cfg(test)]
@@ -447,6 +472,43 @@ mod tests {
         tags.push(Tag::custom(TagKind::Payload, ["not-a-real-hash"]));
         let mismatched_payload = auth_event(tags, now);
         assert!(validate_auth_event(&mismatched_payload, &req, body).is_err());
+    }
+
+    #[test]
+    fn configured_allowlist_trims_blank_entries() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        env::set_var("ALLOWED_PUBKEYS", " abc, def ,, ghi ");
+
+        assert_eq!(configured_allowed_pubkeys(), vec!["abc", "def", "ghi"]);
+
+        env::remove_var("ALLOWED_PUBKEYS");
+    }
+
+    #[tokio::test]
+    async fn public_config_exposes_allowlist_without_auth() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        let pool = setup_route_test_db().await;
+        env::set_var("ALLOWED_PUBKEYS", "abc,def");
+
+        let response = crate::api::http::routes::routes(pool)
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri("/config")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        env::remove_var("ALLOWED_PUBKEYS");
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), MAX_AUTH_BODY_BYTES)
+            .await
+            .unwrap();
+        let config: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(config["allowed_pubkeys"], serde_json::json!(["abc", "def"]));
     }
 
     #[test]
