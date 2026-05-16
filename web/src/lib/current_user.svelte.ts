@@ -7,7 +7,7 @@ import {
 let currentUser: CurrentUser | null = $state(null);
 
 class CurrentUser {
-    /** The Nostr user currently signed in through NIP-07. */
+    /** The Nostr user currently signed in through a browser, remote, or Android signer. */
     user: NostrUser | null = $state(null);
 
     /** Array of pubkeys that the current user follows */
