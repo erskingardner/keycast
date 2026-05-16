@@ -1,8 +1,9 @@
 <script lang="ts">
 import { page } from "$app/stores";
 import { getCurrentUser } from "$lib/current_user.svelte";
-import { signin, signout } from "$lib/utils/auth";
-import { Key, SignIn, SignOut } from "phosphor-svelte";
+import SignInMenu from "$lib/components/SignInMenu.svelte";
+import { signout } from "$lib/utils/auth";
+import { Key, SignOut } from "phosphor-svelte";
 
 const user = $derived(getCurrentUser()?.user);
 const activePage = $derived($page.url.pathname);
@@ -33,13 +34,7 @@ const activePage = $derived($page.url.pathname);
                 Sign out
             </button>
         {:else}
-            <button
-                onclick={() => signin()}
-                class="button button-primary button-icon"
-            >
-                <SignIn size="20" />
-                Sign in
-            </button>
+            <SignInMenu />
         {/if}
     </nav>
 </div>

@@ -3,11 +3,10 @@ import { getContext, setContext } from "svelte";
 import { signNostrEvent } from "./nostr";
 import {
     buildNip98Tags,
+    NIP_98_HTTP_AUTH_KIND,
     normalizeApiBaseUrl,
     type HttpAuthMethod,
 } from "./utils/http_auth";
-
-const NIP_98_HTTP_AUTH_KIND = 27235;
 
 export class KeycastApi {
     private baseUrl: string;
