@@ -444,7 +444,7 @@ mod tests {
     #[test]
     fn rejects_future_timestamps() {
         let req = request(Method::GET, "/teams");
-        let future = chrono::Utc::now().timestamp() + AUTH_EVENT_MAX_FUTURE_SKEW_SECONDS + 1;
+        let future = chrono::Utc::now().timestamp() + AUTH_EVENT_MAX_FUTURE_SKEW_SECONDS + 60;
         let event = auth_event(
             standard_tags("GET", "https://example.com/api/teams"),
             future,

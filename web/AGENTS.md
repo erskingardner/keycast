@@ -15,8 +15,10 @@ This file inherits the root `AGENTS.md` guidance. It applies to `web/`.
 - Keep NIP-98 body hashes in exact sync with the JSON sent to the API.
 - Permission form data must match the Rust structs exactly.
 - Do not store private keys in localStorage or sessionStorage.
-- Do not restore `nostr-login`; sign-in should stay on the raw NIP-07 browser extension API unless
-  there is a fresh security review.
+- Do not restore `nostr-login`; sign-in should stay on the explicit signer-session paths in
+  `src/lib/nostr.ts` unless there is a fresh security review.
+- Remote signer session storage may contain NIP-46 client material, but never the user's Nostr
+  private key.
 - Submit handlers should prevent default browser form submission before doing async signing.
 - For security-sensitive UI changes, run both typecheck and build.
 
