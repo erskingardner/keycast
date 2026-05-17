@@ -68,11 +68,11 @@ jobs:
       - name: Install web dependencies
         run: bun install --frozen-lockfile
 
-      - name: Test web package
-        run: bun test
-
       - name: Check Svelte package
         run: bun run check
+
+      - name: Test web package
+        run: bun test
 
       - name: Build web package
         run: bun run build
