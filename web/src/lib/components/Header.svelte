@@ -1,11 +1,18 @@
 <script lang="ts">
 import { page } from "$app/stores";
 import { getCurrentUser } from "$lib/current_user.svelte";
-import { signin, signout } from "$lib/utils/auth";
+import { hasAmberSignerSupport, hasNip07Extension } from "$lib/nostr";
+import { signin, signout, type SigninMethod } from "$lib/utils/auth";
 import { Key, SignIn, SignOut } from "phosphor-svelte";
 
 const user = $derived(getCurrentUser()?.user);
 const activePage = $derived($page.url.pathname);
+let signInMenuOpen = $state(false);
+
+async function startSignin(method: SigninMethod) {
+    signInMenuOpen = false;
+    await signin(method);
+}
 </script>
 
 
@@ -33,13 +40,50 @@ const activePage = $derived($page.url.pathname);
                 Sign out
             </button>
         {:else}
-            <button
-                onclick={() => signin()}
-                class="button button-primary button-icon"
-            >
-                <SignIn size="20" />
-                Sign in
-            </button>
+            <div class="relative">
+                <button
+                    onclick={() => {
+                        signInMenuOpen = !signInMenuOpen;
+                    }}
+                    class="button button-primary button-icon"
+                >
+                    <SignIn size="20" />
+                    Sign in
+                </button>
+                {#if signInMenuOpen}
+                    <div class="absolute right-0 top-12 z-20 min-w-48 rounded-md bg-gray-800 p-2 text-sm shadow-lg ring-1 ring-gray-700">
+                        {#if hasNip07Extension()}
+                            <button class="menu-item" onclick={() => startSignin("extension")}>
+                                Browser extension
+                            </button>
+                        {/if}
+                        {#if hasAmberSignerSupport()}
+                            <button class="menu-item" onclick={() => startSignin("amber")}>
+                                Amber
+                            </button>
+                        {/if}
+                        <button class="menu-item" onclick={() => startSignin("remote")}>
+                            Remote signer
+                        </button>
+                    </div>
+                {/if}
+            </div>
         {/if}
     </nav>
 </div>
+
+<style>
+    .menu-item {
+        display: block;
+        width: 100%;
+        border-radius: 0.375rem;
+        padding: 0.5rem 0.75rem;
+        text-align: left;
+        color: rgb(229 231 235);
+    }
+
+    .menu-item:hover {
+        background: rgb(55 65 81);
+        color: white;
+    }
+</style>

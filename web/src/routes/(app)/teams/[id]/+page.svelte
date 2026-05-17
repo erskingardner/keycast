@@ -29,6 +29,13 @@ let team: TeamWithRelations | null = $state(null);
 let users: User[] = $state([]);
 let storedKeys: StoredKey[] = $state([]);
 let policies: PolicyWithPermissions[] = $state([]);
+let isAdmin = $derived(
+    users.some(
+        (team_user) =>
+            team_user.user_public_key === user?.pubkey &&
+            team_user.role === "Admin",
+    ),
+);
 
 $effect(() => {
     if (user?.pubkey && !teamAuthHeader) {
@@ -128,14 +135,18 @@ async function removeUser(userToRemove: User) {
                         </span>
                     </div>
                     <AdminPill {user} />
-                    <button onclick={() => showUserMenu(user)} class="absolute top-1.5 right-1"><DotsThreeVertical size={20} weight="bold" class="text-gray-500 hover:text-gray-200" /></button>
-                    <div id={`user-menu-${user.user_public_key}`} class="hidden absolute top-8 right-1 bg-gray-700 ring-1 ring-gray-600 shadow-lg rounded-md p-2 text-sm">
-                        <button onclick={() => removeUser(user)} class="text-gray-200 hover:text-white">Remove User</button>
-                    </div>
+                    {#if isAdmin}
+                        <button onclick={() => showUserMenu(user)} class="absolute top-1.5 right-1"><DotsThreeVertical size={20} weight="bold" class="text-gray-500 hover:text-gray-200" /></button>
+                        <div id={`user-menu-${user.user_public_key}`} class="hidden absolute top-8 right-1 bg-gray-700 ring-1 ring-gray-600 shadow-lg rounded-md p-2 text-sm">
+                            <button onclick={() => removeUser(user)} class="text-gray-200 hover:text-white">Remove User</button>
+                        </div>
+                    {/if}
                 </div>
             {/each}
         </div>
-        <a href={`/teams/${id}/users/new`} class="button button-primary">Add Member</a>
+        {#if isAdmin}
+            <a href={`/teams/${id}/users/new`} class="button button-primary">Add Member</a>
+        {/if}
     </PageSection>
 
 
@@ -146,26 +157,47 @@ async function removeUser(userToRemove: User) {
             {:else}
                 <div class="card-grid">
                     {#each storedKeys as key}
-                        <a href={`/teams/${id}/keys/${key.public_key}`} class="card hover-card flex flex-row! gap-4 ">
-                            <Avatar pubkey={key.public_key} extraClasses="w-12 h-12" />
-                            <div class="flex flex-col gap-1">
-                                <span class="font-semibold">
-                                    {key.name}
-                                </span>
-                                <div class="flex flex-row gap-1">
-                                    <span class="text-xs text-gray-500">
-                                        <Name pubkey={key.public_key} />
+                        {#if isAdmin}
+                            <a href={`/teams/${id}/keys/${key.public_key}`} class="card hover-card flex flex-row! gap-4 ">
+                                <Avatar pubkey={key.public_key} extraClasses="w-12 h-12" />
+                                <div class="flex flex-col gap-1">
+                                    <span class="font-semibold">
+                                        {key.name}
                                     </span>
-                                    <span class="font-mono text-xs text-gray-500">
-                                        ({truncatedNpubForPubkey(key.public_key)}&hellip;)
+                                    <div class="flex flex-row gap-1">
+                                        <span class="text-xs text-gray-500">
+                                            <Name pubkey={key.public_key} />
+                                        </span>
+                                        <span class="font-mono text-xs text-gray-500">
+                                            ({truncatedNpubForPubkey(key.public_key)}&hellip;)
+                                        </span>
+                                    </div>
+                                </div>
+                            </a>
+                        {:else}
+                            <div class="card flex flex-row! gap-4 ">
+                                <Avatar pubkey={key.public_key} extraClasses="w-12 h-12" />
+                                <div class="flex flex-col gap-1">
+                                    <span class="font-semibold">
+                                        {key.name}
                                     </span>
+                                    <div class="flex flex-row gap-1">
+                                        <span class="text-xs text-gray-500">
+                                            <Name pubkey={key.public_key} />
+                                        </span>
+                                        <span class="font-mono text-xs text-gray-500">
+                                            ({truncatedNpubForPubkey(key.public_key)}&hellip;)
+                                        </span>
+                                    </div>
                                 </div>
                             </div>
-                        </a>
+                        {/if}
                     {/each}
                 </div>
             {/if}
-            <a href={`/teams/${id}/keys/new`} class="button button-primary">Add Key</a>
+            {#if isAdmin}
+                <a href={`/teams/${id}/keys/new`} class="button button-primary">Add Key</a>
+            {/if}
         </div>
     </PageSection>
 
@@ -180,11 +212,13 @@ async function removeUser(userToRemove: User) {
                     {/each}
                 </div>
             {/if}
-            <a href={`/teams/${id}/policies/new`} class="button button-primary self-start">Add Policy</a>
+            {#if isAdmin}
+                <a href={`/teams/${id}/policies/new`} class="button button-primary self-start">Add Policy</a>
+            {/if}
         </div>
     </PageSection>
 
-    {#if users && users.some((team_user) => team_user.user_public_key === user?.pubkey && team_user.role === "Admin")}
+    {#if isAdmin}
         <PageSection title="Danger Zone">
             <button onclick={deleteTeam} class="button button-danger">Delete Team</button>
         </PageSection>

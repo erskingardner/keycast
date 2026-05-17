@@ -1,7 +1,10 @@
 import { goto } from "$app/navigation";
 import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
 import {
+    clearSignerSession,
+    getAmberPubkey,
     getExtensionPubkey,
+    getRemoteSignerPubkey,
     hasNip07Extension,
     userFromPubkey,
     type NostrUser,
@@ -9,12 +12,16 @@ import {
 import toast from "svelte-hot-french-toast";
 import { checkPubkeyAllowed } from "./allowlist";
 
+export type SigninMethod = "extension" | "amber" | "remote";
+
 async function isAllowedPubkey(pubkey: string) {
     return checkPubkeyAllowed(pubkey);
 }
 
-export async function signin(): Promise<NostrUser | null> {
-    const signedInUser = await userFromNip07();
+export async function signin(
+    method: SigninMethod = "extension",
+): Promise<NostrUser | null> {
+    const signedInUser = await userFromSigner(method);
 
     if (signedInUser) {
         let allowed = false;
@@ -42,20 +49,20 @@ export async function signin(): Promise<NostrUser | null> {
 }
 
 /**
- * Retrieves a user object using the raw NIP-07 browser extension API.
+ * Retrieves a user object using the selected external signer.
  * @async
- * @returns A Promise that resolves to a Nostr user if a NIP-07 extension is available, or null otherwise.
+ * @returns A Promise that resolves to a Nostr user if the signer returns a valid pubkey, or null otherwise.
  */
-async function userFromNip07(): Promise<NostrUser | null> {
-    if (!hasNip07Extension()) {
+async function userFromSigner(method: SigninMethod): Promise<NostrUser | null> {
+    if (method === "extension" && !hasNip07Extension()) {
         toast.error("Install or enable a NIP-07 browser extension to sign in");
         return null;
     }
 
     try {
-        const user = userFromPubkey(await getExtensionPubkey());
+        const user = userFromPubkey(await getPubkeyForMethod(method));
         if (!user) {
-            toast.error("The NIP-07 extension did not return a valid pubkey");
+            toast.error("The signer did not return a valid pubkey");
             return null;
         }
 
@@ -68,11 +75,29 @@ async function userFromNip07(): Promise<NostrUser | null> {
     }
 }
 
+async function getPubkeyForMethod(method: SigninMethod): Promise<string> {
+    if (method === "extension") {
+        return getExtensionPubkey();
+    }
+
+    if (method === "amber") {
+        return getAmberPubkey();
+    }
+
+    const bunkerUri = window.prompt("Paste your bunker:// remote signer URI");
+    if (!bunkerUri) {
+        throw new Error("Remote signer URI was not provided");
+    }
+
+    return getRemoteSignerPubkey(bunkerUri.trim());
+}
+
 /**
  * Signs the user out.
  */
 export function signout() {
     setCurrentUser(null);
+    clearSignerSession();
     document.cookie = "keycastUserPubkey=";
     toast.success("Signed out");
     goto("/");

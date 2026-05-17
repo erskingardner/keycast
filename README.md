@@ -151,9 +151,11 @@ Socket organization policy.
 
 ## Runtime Flow
 
-1. The web app asks the raw NIP-07 browser extension API for the active Nostr pubkey.
+1. The web app signs in through a selected external signer: NIP-07 browser extension, Amber/NIP-55
+   clipboard signing on Android, or a `bunker://` NIP-46 remote signer.
 2. API calls include a NIP-98 HTTP auth event in the `Authorization` header.
-3. The API verifies the event, extracts the pubkey, and checks team admin rights for most routes.
+3. The API verifies the event, extracts the pubkey, and checks team membership for team reads and
+   admin rights for mutations or authorization-secret-bearing routes.
 4. Stored keys and per-authorization bunker keys are encrypted with the root `master.key`.
 5. The signer manager watches authorization rows and starts a `signer_daemon` for each one.
 6. Each signer daemon decrypts the stored key and bunker key, listens on configured relays, and calls
