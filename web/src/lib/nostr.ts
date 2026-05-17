@@ -4,32 +4,23 @@ import type {
     NostrEvent,
     ProfileContent,
 } from "applesauce-core/helpers";
-import {
-    bytesToHex,
-    getEventHash,
-    hexToBytes,
-    verifyEvent,
-} from "applesauce-core/helpers/event";
 import { normalizeToPubkey, npubEncode } from "applesauce-core/helpers";
+import { getEventHash, verifyEvent } from "applesauce-core/helpers/event";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { RelayPool } from "applesauce-relay";
+import type { ISigner } from "applesauce-signers";
 import {
     AmberClipboardSigner,
     ExtensionSigner,
     NostrConnectSigner,
-    PrivateKeySigner,
-    type ISigner,
 } from "applesauce-signers";
 import { catchError, filter, firstValueFrom, of, timeout } from "rxjs";
 import {
-    parseStoredSignerSession,
-    serializeStoredSignerSession,
-    type StoredSignerSession,
-} from "$lib/utils/signer_session";
-import {
     DEFAULT_NOSTR_READ_RELAYS,
     DEFAULT_OUTBOX_RELAYS,
+    REQUIRED_PUBLIC_RELAYS,
 } from "$lib/utils/relays";
+import { NIP_98_HTTP_AUTH_KIND } from "./utils/http_auth";
 
 export type NostrUser = {
     pubkey: string;
@@ -37,20 +28,31 @@ export type NostrUser = {
 };
 
 export type NostrProfile = ProfileContent;
+export type SignerKind = "extension" | "nostr-connect" | "amber";
+export type ActiveSignerSummary = {
+    kind: SignerKind;
+    pubkey: string;
+};
+export type ActiveSigner = ActiveSignerSummary & {
+    signer: ISigner;
+};
+export type NostrConnectSigninSession = {
+    uri: string;
+    waitForUser: (abort?: AbortSignal) => Promise<NostrUser>;
+    cancel: () => void;
+};
 
 const PROFILE_LOAD_TIMEOUT_MS = 5000;
 const CONTACTS_LOAD_TIMEOUT_MS = 5000;
-const REMOTE_SIGNER_TIMEOUT_MS = 30000;
-const NIP_98_HTTP_AUTH_KIND = 27235;
-const SIGNER_SESSION_STORAGE_KEY = "keycastSignerSession";
 const HEX_SIGNATURE = /^[0-9a-f]{128}$/i;
+export const DEFAULT_NOSTR_CONNECT_RELAYS = [
+    "wss://relay.nsec.app",
+    ...REQUIRED_PUBLIC_RELAYS,
+] as const;
 
 export const eventStore = new EventStore();
 export const relayPool = new RelayPool();
-NostrConnectSigner.pool = relayPool;
-
-let activeSigner: ISigner | null = null;
-let activeSignerSession: StoredSignerSession | null = null;
+let activeSigner: ActiveSigner | null = null;
 
 const loaderRelays = Array.from(
     new Set([...DEFAULT_NOSTR_READ_RELAYS, ...DEFAULT_OUTBOX_RELAYS]),
@@ -94,6 +96,26 @@ export function hasNip07Extension(): boolean {
     return typeof window !== "undefined" && !!window.nostr;
 }
 
+export function isAmberSigninSupported(): boolean {
+    return (
+        typeof navigator !== "undefined" &&
+        /Android/i.test(navigator.userAgent)
+    );
+}
+
+export function normalizeBunkerUri(uri: string): string {
+    const normalized = uri.trim();
+    if (!normalized.toLowerCase().startsWith("bunker://")) {
+        throw new Error("Paste a bunker:// remote signer connection string");
+    }
+
+    return normalized;
+}
+
+export function buildNip46SigningPermissions(): string[] {
+    return NostrConnectSigner.buildSigningPermissions([NIP_98_HTTP_AUTH_KIND]);
+}
+
 export function getExtensionSigner(): ExtensionSigner {
     if (!hasNip07Extension()) {
         throw new Error("Install or enable a NIP-07 browser extension to sign in");
@@ -103,61 +125,110 @@ export function getExtensionSigner(): ExtensionSigner {
 }
 
 export async function getExtensionPubkey(): Promise<string> {
-    const signer = getExtensionSigner();
-    const pubkey = normalizePubkey(await signer.getPublicKey());
+    const pubkey = normalizePubkey(await getExtensionSigner().getPublicKey());
     if (!pubkey) {
         throw new Error("The NIP-07 extension did not return a valid pubkey");
     }
 
-    rememberSigner({ kind: "extension", pubkey }, signer);
     return pubkey;
 }
 
-export function hasAmberSignerSupport(): boolean {
-    return (
-        typeof navigator !== "undefined" &&
-        /Android/i.test(navigator.userAgent)
-    );
+export async function getExtensionUser(): Promise<NostrUser> {
+    return userFromSigner(getExtensionSigner(), "extension");
 }
 
-export async function getAmberPubkey(): Promise<string> {
-    const signer = new ManualAmberSigner();
-    const pubkey = normalizePubkey(await signer.getPublicKey());
+export async function getAmberUser(): Promise<NostrUser> {
+    return userFromSigner(new ManualAmberSigner(), "amber");
+}
+
+export async function connectNostrConnectBunker(
+    bunkerUri: string,
+): Promise<NostrUser> {
+    const signer = await NostrConnectSigner.fromBunkerURI(normalizeBunkerUri(bunkerUri), {
+        pool: relayPool,
+        permissions: buildNip46SigningPermissions(),
+        onAuth: openSignerAuthChallenge,
+    });
+
+    return userFromSigner(signer, "nostr-connect");
+}
+
+export function createNostrConnectSigninSession(
+    relays: readonly string[] = DEFAULT_NOSTR_CONNECT_RELAYS,
+): NostrConnectSigninSession {
+    const signer = new NostrConnectSigner({
+        relays: [...relays],
+        pool: relayPool,
+        onAuth: openSignerAuthChallenge,
+    });
+    const uri = signer.getNostrConnectURI({
+        name: "Keycast",
+        url: browserOrigin(),
+        permissions: buildNip46SigningPermissions(),
+    });
+
+    return {
+        uri,
+        waitForUser: async (abort?: AbortSignal) => {
+            await signer.waitForSigner(abort);
+            return userFromSigner(signer, "nostr-connect");
+        },
+        cancel: () => {
+            void signer.close();
+        },
+    };
+}
+
+export function setActiveSigner(next: ActiveSigner): ActiveSigner {
+    const pubkey = normalizePubkey(next.pubkey);
     if (!pubkey) {
-        throw new Error("Amber did not return a valid pubkey");
+        throw new Error("Signer returned an invalid pubkey");
     }
 
-    rememberSigner({ kind: "amber", pubkey }, signer);
-    return pubkey;
+    if (activeSigner?.signer !== next.signer) {
+        disposeSigner(activeSigner?.signer);
+    }
+
+    activeSigner = {
+        kind: next.kind,
+        pubkey,
+        signer: next.signer,
+    };
+    return activeSigner;
 }
 
-export async function getRemoteSignerPubkey(bunkerUri: string): Promise<string> {
-    const { signer, session } = await connectRemoteSigner(bunkerUri);
-    rememberSigner(session, signer);
-    return session.pubkey;
-}
-
-export function clearSignerSession() {
+export function clearActiveSigner(): void {
+    disposeSigner(activeSigner?.signer);
     activeSigner = null;
-    activeSignerSession = null;
-    browserStorage()?.removeItem(SIGNER_SESSION_STORAGE_KEY);
+}
+
+export function getActiveSignerSummary(): ActiveSignerSummary | null {
+    if (!activeSigner) return null;
+
+    return {
+        kind: activeSigner.kind,
+        pubkey: activeSigner.pubkey,
+    };
 }
 
 export async function signNostrEvent(
     template: EventTemplate,
     expectedPubkey?: string,
 ): Promise<NostrEvent> {
-    const signer = await signerForRequest(expectedPubkey);
-    const signedEvent =
-        signer instanceof ManualAmberSigner && expectedPubkey
-            ? await signer.signEvent({
-                  ...template,
-                  pubkey: expectedPubkey,
-              } as EventTemplate & { pubkey: string })
-            : await signer.signEvent(template);
+    const signer = activeSigner?.signer ?? getExtensionSigner();
     const normalizedExpectedPubkey = expectedPubkey
         ? normalizePubkey(expectedPubkey)
         : null;
+
+    if (
+        activeSigner &&
+        normalizedExpectedPubkey &&
+        activeSigner.pubkey !== normalizedExpectedPubkey
+    ) {
+        throw new Error("The active signer is connected to a different pubkey");
+    }
+
+    const signedEvent = await signer.signEvent(template);
 
     if (
         normalizedExpectedPubkey &&
@@ -169,149 +240,26 @@ export async function signNostrEvent(
     return signedEvent;
 }
 
-function browserStorage(): Storage | null {
-    if (typeof window === "undefined") return null;
-    return window.localStorage;
-}
-
-function readStoredSignerSession(): StoredSignerSession | null {
-    return parseStoredSignerSession(
-        browserStorage()?.getItem(SIGNER_SESSION_STORAGE_KEY),
-    );
-}
-
-function rememberSigner(session: StoredSignerSession, signer: ISigner) {
-    activeSignerSession = session;
-    activeSigner = signer;
-    browserStorage()?.setItem(
-        SIGNER_SESSION_STORAGE_KEY,
-        serializeStoredSignerSession(session),
-    );
-}
-
-async function signerForRequest(expectedPubkey?: string): Promise<ISigner> {
-    const normalizedExpectedPubkey = expectedPubkey
-        ? normalizePubkey(expectedPubkey)
-        : null;
-    const storedSession = readStoredSignerSession();
-
-    if (
-        activeSigner &&
-        activeSignerSession &&
-        (!normalizedExpectedPubkey ||
-            activeSignerSession.pubkey === normalizedExpectedPubkey)
-    ) {
-        return activeSigner;
+async function userFromSigner(signer: ISigner, kind: SignerKind): Promise<NostrUser> {
+    const pubkey = normalizePubkey(await signer.getPublicKey());
+    if (!pubkey) {
+        throw new Error("The signer did not return a valid pubkey");
     }
 
-    if (storedSession) {
-        if (
-            normalizedExpectedPubkey &&
-            storedSession.pubkey !== normalizedExpectedPubkey
-        ) {
-            throw new Error("Stored signer session does not match the signed-in user");
-        }
-
-        const signer = await signerFromSession(storedSession);
-        activeSigner = signer;
-        activeSignerSession = storedSession;
-        return signer;
+    const user = userFromPubkey(pubkey);
+    if (!user) {
+        throw new Error("The signer did not return a valid pubkey");
     }
 
-    return getExtensionSigner();
-}
-
-async function signerFromSession(session: StoredSignerSession): Promise<ISigner> {
-    if (session.kind === "extension") {
-        return getExtensionSigner();
-    }
-
-    if (session.kind === "amber") {
-        return new ManualAmberSigner(session.pubkey);
-    }
-
-    return (await connectRemoteSigner(
-        session.bunkerUri,
-        session.clientSecretHex,
-    )).signer;
-}
-
-async function connectRemoteSigner(
-    bunkerUri: string,
-    clientSecretHex?: string,
-): Promise<{ signer: NostrConnectSigner; session: StoredSignerSession }> {
-    const parsed = NostrConnectSigner.parseBunkerURI(bunkerUri);
-    const clientSigner = clientSecretHex
-        ? new PrivateKeySigner(hexToBytes(clientSecretHex))
-        : new PrivateKeySigner();
-    const signer = new NostrConnectSigner({
-        relays: parsed.relays,
-        remote: parsed.remote,
-        signer: clientSigner,
-        pool: relayPool,
-        onAuth: async (url) => {
-            window.open(url, "auth", "width=400,height=600");
-        },
-    });
-
-    try {
-        await withTimeout(
-            signer.connect(
-                parsed.secret,
-                NostrConnectSigner.buildSigningPermissions([
-                    NIP_98_HTTP_AUTH_KIND,
-                ]),
-            ),
-            REMOTE_SIGNER_TIMEOUT_MS,
-            "Remote signer connection timed out",
-        );
-
-        const pubkey = normalizePubkey(
-            await withTimeout(
-                signer.getPublicKey(),
-                REMOTE_SIGNER_TIMEOUT_MS,
-                "Remote signer did not return a pubkey",
-            ),
-        );
-        if (!pubkey) throw new Error("Remote signer returned an invalid pubkey");
-
-        return {
-            signer,
-            session: {
-                kind: "remote",
-                pubkey,
-                bunkerUri,
-                clientSecretHex: bytesToHex(clientSigner.key),
-            },
-        };
-    } catch (error) {
-        await signer.close();
-        throw error;
-    }
-}
-
-async function withTimeout<T>(
-    promise: Promise<T>,
-    timeoutMs: number,
-    message: string,
-): Promise<T> {
-    let timeoutId: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-        timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
-    });
-
-    try {
-        return await Promise.race([promise, timeoutPromise]);
-    } finally {
-        if (timeoutId) clearTimeout(timeoutId);
-    }
+    setActiveSigner({ kind, signer, pubkey });
+    return user;
 }
 
 class ManualAmberSigner implements ISigner {
-    constructor(public pubkey?: string) {}
+    pubkey?: string;
 
     async getPublicKey(): Promise<string> {
-        if (!hasAmberSignerSupport()) {
+        if (!isAmberSigninSupported()) {
             throw new Error("Amber signing is only available on Android");
         }
 
@@ -320,7 +268,7 @@ class ManualAmberSigner implements ISigner {
         const result = await requestAmberResult(
             AmberClipboardSigner.createGetPublicKeyIntent(),
             "public key",
-            false,
+            (value) => normalizePubkey(value) !== null,
         );
         const pubkey = normalizePubkey(result);
         if (!pubkey) throw new Error("Expected Amber to return a pubkey");
@@ -332,7 +280,7 @@ class ManualAmberSigner implements ISigner {
     async signEvent(
         template: EventTemplate & { pubkey?: string },
     ): Promise<NostrEvent> {
-        if (!hasAmberSignerSupport()) {
+        if (!isAmberSigninSupported()) {
             throw new Error("Amber signing is only available on Android");
         }
 
@@ -346,14 +294,13 @@ class ManualAmberSigner implements ISigner {
             id: getEventHash(draftWithPubkey),
         };
         const result = await requestAmberResult(
-            AmberClipboardSigner.createSignEventIntent(draftWithId),
+            AmberClipboardSigner.createSignEventIntent(
+                draftWithId as EventTemplate,
+            ),
             "signature",
+            (value) => HEX_SIGNATURE.test(value),
         );
         const signature = result.trim();
-        if (!HEX_SIGNATURE.test(signature)) {
-            throw new Error("Expected Amber to return a hex signature");
-        }
-
         const event = { ...draftWithId, sig: signature };
         if (!verifyEvent(event)) {
             throw new Error("Amber returned an invalid signature");
@@ -366,7 +313,7 @@ class ManualAmberSigner implements ISigner {
 async function requestAmberResult(
     intent: string,
     label: string,
-    readClipboardOnReturn = true,
+    accepts: (value: string) => boolean,
 ): Promise<string> {
     if (typeof window === "undefined" || typeof document === "undefined") {
         throw new Error("Amber signing requires a browser");
@@ -375,15 +322,20 @@ async function requestAmberResult(
     window.open(intent, "_blank");
     const returnedFromAmber = await waitForBrowserToReturn();
 
-    if (returnedFromAmber && readClipboardOnReturn) {
-        const clipboardResult = await readClipboardText();
-        if (clipboardResult.trim()) return clipboardResult.trim();
+    if (returnedFromAmber) {
+        const clipboardResult = (await readClipboardText()).trim();
+        if (clipboardResult && accepts(clipboardResult)) {
+            return clipboardResult;
+        }
     }
 
     const manualResult = window.prompt(`Paste the Amber ${label} result`);
-    if (manualResult?.trim()) return manualResult.trim();
+    const trimmedManualResult = manualResult?.trim() ?? "";
+    if (trimmedManualResult && accepts(trimmedManualResult)) {
+        return trimmedManualResult;
+    }
 
-    throw new Error(`Amber ${label} result was not provided`);
+    throw new Error(`Amber ${label} result was invalid or not provided`);
 }
 
 async function waitForBrowserToReturn(): Promise<boolean> {
@@ -433,6 +385,35 @@ async function readClipboardText(): Promise<string> {
     }
 
     return "";
+}
+
+function disposeSigner(signer: ISigner | null | undefined): void {
+    const disposable = signer as
+        | {
+              close?: () => Promise<void> | void;
+              destroy?: () => void;
+          }
+        | null
+        | undefined;
+
+    if (disposable?.close) void disposable.close();
+    disposable?.destroy?.();
+}
+
+function openSignerAuthChallenge(url: string): Promise<void> {
+    if (typeof window !== "undefined") {
+        window.open(
+            url,
+            "keycast-signer-auth",
+            "width=420,height=640,resizable=yes,status=no,location=yes,toolbar=no,menubar=no",
+        );
+    }
+
+    return Promise.resolve();
+}
+
+function browserOrigin(): string | undefined {
+    return typeof location === "undefined" ? undefined : location.origin;
 }
 
 export async function loadProfile(

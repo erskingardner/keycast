@@ -1,4 +1,5 @@
 export type HttpAuthMethod = "GET" | "POST" | "PUT" | "DELETE";
+export const NIP_98_HTTP_AUTH_KIND = 27235;
 const DEFAULT_LOCAL_API_ORIGIN = "http://localhost:3100";
 
 export function normalizeApiBaseUrl(
