@@ -8,11 +8,7 @@ import { normalizeToPubkey, npubEncode } from "applesauce-core/helpers";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { RelayPool } from "applesauce-relay";
 import type { ISigner } from "applesauce-signers";
-import {
-    AmberClipboardSigner,
-    ExtensionSigner,
-    NostrConnectSigner,
-} from "applesauce-signers";
+import { ExtensionSigner, NostrConnectSigner } from "applesauce-signers";
 import { catchError, filter, firstValueFrom, of, timeout } from "rxjs";
 import {
     DEFAULT_NOSTR_READ_RELAYS,
@@ -39,6 +35,10 @@ export type NostrConnectSigninSession = {
     uri: string;
     waitForUser: (abort?: AbortSignal) => Promise<NostrUser>;
     cancel: () => void;
+};
+export type NostrConnectSigninOptions = {
+    relays?: readonly string[];
+    signerKind?: "nostr-connect" | "amber";
 };
 
 const PROFILE_LOAD_TIMEOUT_MS = 5000;
@@ -95,7 +95,10 @@ export function hasNip07Extension(): boolean {
 }
 
 export function isAmberSigninSupported(): boolean {
-    return Boolean(AmberClipboardSigner.SUPPORTED);
+    return (
+        typeof navigator !== "undefined" &&
+        /\bAndroid\b/i.test(navigator.userAgent)
+    );
 }
 
 export function normalizeBunkerUri(uri: string): string {
@@ -132,10 +135,6 @@ export async function getExtensionUser(): Promise<NostrUser> {
     return userFromSigner(getExtensionSigner(), "extension");
 }
 
-export async function getAmberUser(): Promise<NostrUser> {
-    return userFromSigner(new AmberClipboardSigner(), "amber");
-}
-
 export async function connectNostrConnectBunker(
     bunkerUri: string,
 ): Promise<NostrUser> {
@@ -149,8 +148,10 @@ export async function connectNostrConnectBunker(
 }
 
 export function createNostrConnectSigninSession(
-    relays: readonly string[] = DEFAULT_NOSTR_CONNECT_RELAYS,
+    options: NostrConnectSigninOptions = {},
 ): NostrConnectSigninSession {
+    const relays = options.relays ?? DEFAULT_NOSTR_CONNECT_RELAYS;
+    const signerKind = options.signerKind ?? "nostr-connect";
     const signer = new NostrConnectSigner({
         relays: [...relays],
         pool: relayPool,
@@ -166,7 +167,7 @@ export function createNostrConnectSigninSession(
         uri,
         waitForUser: async (abort?: AbortSignal) => {
             await signer.waitForSigner(abort);
-            return userFromSigner(signer, "nostr-connect");
+            return userFromSigner(signer, signerKind);
         },
         cancel: () => {
             void signer.close();

@@ -23,6 +23,7 @@ const user = $derived(getCurrentUser()?.user);
 let isLoading = $state(true);
 let teamAuthHeader: string | null = $state(null);
 
+let authorizationName = $state("");
 let maxUses: number | null = $state(0);
 let expiresAt: Date | null = $state(null);
 let relaysString: string = $state(relayListForInput());
@@ -79,7 +80,9 @@ async function createAuthorization() {
         return;
     }
 
+    const name = authorizationName.trim();
     const request = {
+        name: name || null,
         max_uses: maxUses === 0 ? null : maxUses,
         expires_at: expiresAt
             ? Math.floor(new Date(expiresAt).getTime() / 1000)
@@ -121,6 +124,16 @@ async function createAuthorization() {
 
 <PageSection title="Authorization">
     <form onsubmit={(event) => { event.preventDefault(); createAuthorization(); }}>
+        <div class="form-group">
+            <label for="authorizationName">Nickname</label>
+            <input
+                id="authorizationName"
+                type="text"
+                maxlength="80"
+                bind:value={authorizationName}
+            />
+        </div>
+
         <div class="form-group">
             <label for="maxUses">Maximum uses (Zero for unlimited)</label>
             <input type="number" bind:value={maxUses} />

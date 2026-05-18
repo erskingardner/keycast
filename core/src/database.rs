@@ -158,6 +158,7 @@ mod tests {
             &migrations_dir,
             "0002_normalize_allowed_kinds_permissions.sql",
         );
+        copy_migration(&migrations_dir, "0003_add_authorization_name.sql");
 
         let database = Database::new(db_path.clone(), migrations_dir.clone())
             .await
@@ -169,7 +170,7 @@ mod tests {
                 .fetch_all(pool)
                 .await
                 .expect("read migration versions");
-        assert_eq!(migration_versions, vec![1, 2]);
+        assert_eq!(migration_versions, vec![1, 2, 3]);
 
         let migrated_config: serde_json::Value = query_scalar(
             "SELECT config FROM permissions
@@ -195,8 +196,8 @@ mod tests {
         .expect("read current-shape config");
         assert_eq!(current_shape_config, json!({ "allowed_kinds": [9735] }));
 
-        let existing_authorization: (String, i64, String) = query_as(
-            "SELECT secret, max_uses, bunker_public_key FROM authorizations WHERE secret = ?",
+        let existing_authorization: (String, i64, String, Option<String>) = query_as(
+            "SELECT secret, max_uses, bunker_public_key, name FROM authorizations WHERE secret = ?",
         )
         .bind("existing-secret")
         .fetch_one(pool)
@@ -207,7 +208,8 @@ mod tests {
             (
                 "existing-secret".to_string(),
                 10,
-                "existing-bunker-pubkey".to_string()
+                "existing-bunker-pubkey".to_string(),
+                None
             )
         );
 
@@ -227,7 +229,7 @@ mod tests {
                 .fetch_all(&database.pool)
                 .await
                 .expect("read migration versions after second open");
-        assert_eq!(migration_versions, vec![1, 2]);
+        assert_eq!(migration_versions, vec![1, 2, 3]);
         database.pool.close().await;
 
         let _ = fs::remove_dir_all(root);
