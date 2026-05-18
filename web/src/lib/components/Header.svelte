@@ -1,7 +1,7 @@
 <script lang="ts">
 import { page } from "$app/stores";
-import { getCurrentUser } from "$lib/current_user.svelte";
 import SignInMenu from "$lib/components/SignInMenu.svelte";
+import { getCurrentUser } from "$lib/current_user.svelte";
 import { signout } from "$lib/utils/auth";
 import { Key, SignOut } from "phosphor-svelte";
 

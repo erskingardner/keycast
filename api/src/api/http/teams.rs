@@ -140,7 +140,7 @@ pub async fn get_team(
     AuthEvent(event): AuthEvent,
     Path(team_id): Path<u32>,
 ) -> ApiResult<Json<TeamWithRelations>> {
-    verify_admin(&pool, &event.pubkey, team_id).await?;
+    verify_teammate(&pool, &event.pubkey, team_id).await?;
 
     let team_with_relations = Team::find_with_relations(&pool, team_id).await?;
 
@@ -770,6 +770,20 @@ pub async fn verify_admin<'a>(
     }
 }
 
+pub async fn verify_teammate<'a>(
+    pool: &'a SqlitePool,
+    pubkey: &'a PublicKey,
+    team_id: u32,
+) -> ApiResult<()> {
+    match User::is_team_teammate(pool, pubkey, team_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(ApiError::forbidden(
+            "You are not authorized to access this team",
+        )),
+        Err(_) => Err(ApiError::auth("Failed to verify team membership")),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -957,6 +971,52 @@ mod tests {
 
         assert_eq!(policy.policy.team_id, team.team.id);
         assert_eq!(policy.permissions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn team_members_can_read_team_but_not_admin_routes() {
+        let pool = setup_test_db().await;
+        let admin = Keys::generate();
+        let member = Keys::generate();
+        let team = create_team_for(&pool, &admin, "Ops").await;
+
+        let _ = add_user(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path(team.team.id),
+            Json(AddTeammateRequest {
+                user_public_key: member.public_key().to_hex(),
+                role: TeamUserRole::Member,
+            }),
+        )
+        .await
+        .unwrap();
+
+        let team_response = get_team(
+            State(pool.clone()),
+            AuthEvent(auth_event(&member)),
+            Path(team.team.id),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(team_response.team.id, team.team.id);
+        assert_eq!(team_response.team_users.len(), 2);
+
+        let err = add_key(
+            State(pool.clone()),
+            AuthEvent(auth_event(&member)),
+            Path(team.team.id),
+            Json(AddKeyRequest {
+                name: "member key".to_string(),
+                secret_key: Keys::generate().secret_key().to_secret_hex(),
+            }),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, ApiError::Forbidden(_)));
     }
 
     #[tokio::test]

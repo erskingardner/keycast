@@ -31,13 +31,13 @@ The repo-level dev command runs this app through `bun run dev:web`.
 
 ## Auth Flow
 
-Sign-in uses the raw NIP-07 browser extension API to fetch the active pubkey. The app then uses
-Applesauce's extension signer for NIP-98 event signing. `nostr-login` and NDK are no longer part of
-the auth path.
+Sign-in uses an explicit signer session selected by the user: raw NIP-07 browser extension,
+Amber/NIP-55 clipboard signing on Android, or a `bunker://` NIP-46 remote signer. `nostr-login` and
+NDK are no longer part of the auth path.
 
 `src/lib/keycast_api.svelte.ts` builds NIP-98 events with `u`, `method`, and optional `payload` tags,
-signs them with NIP-07 through Applesauce, and sends the base64-encoded event in the
-`Authorization` header. `src/lib/nostr.ts` owns browser signer access and public profile/contact
+signs them through the active signer, and sends the base64-encoded event in the `Authorization`
+header. `src/lib/nostr.ts` owns signer access, signer-session storage, and public profile/contact
 reads through Applesauce's event store and relay pool.
 
 The cookie named `keycastUserPubkey` is only a UI route hint. It is not proof of authorization. API

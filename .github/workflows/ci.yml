@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+
+      - name: Generate test master key
+        run: |
+          set -euo pipefail
+          openssl rand 32 | base64 > master.key
+          chmod 600 master.key
+
+      - name: Check Rust formatting
+        run: cargo fmt --all --check
+
+      - name: Check Rust workspace
+        run: cargo check --workspace --locked
+
+      - name: Build Rust workspace
+        run: cargo build --workspace --locked
+
+      - name: Test Rust workspace
+        run: cargo test --workspace --locked
+
+  web:
+    name: Web
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: web
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.9
+
+      - name: Install web dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Check Svelte package
+        run: bun run check
+
+      - name: Test web package
+        run: bun test
+
+      - name: Build web package
+        run: bun run build
