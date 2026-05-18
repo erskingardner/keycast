@@ -12,7 +12,7 @@ services:
   keycast-api:
     <<: *keycast-hardening
     container_name: keycast-api
-    image: ${KEYCAST_IMAGE:-ghcr.io/erskingardner/keycast}:${KEYCAST_IMAGE_TAG:-master}
+    image: ${KEYCAST_IMAGE:-ghcr.io/marmot-protocol/keycast}:${KEYCAST_IMAGE_TAG:-master}
     command: api
     expose:
       - "3000"
@@ -43,7 +43,7 @@ services:
   keycast-web:
     <<: *keycast-hardening
     container_name: keycast-web
-    image: ${KEYCAST_IMAGE:-ghcr.io/erskingardner/keycast}:${KEYCAST_IMAGE_TAG:-master}
+    image: ${KEYCAST_IMAGE:-ghcr.io/marmot-protocol/keycast}:${KEYCAST_IMAGE_TAG:-master}
     command: web
     expose:
       - "5173"
@@ -77,7 +77,7 @@ services:
   keycast-signer:
     <<: *keycast-hardening
     container_name: keycast-signer
-    image: ${KEYCAST_IMAGE:-ghcr.io/erskingardner/keycast}:${KEYCAST_IMAGE_TAG:-master}
+    image: ${KEYCAST_IMAGE:-ghcr.io/marmot-protocol/keycast}:${KEYCAST_IMAGE_TAG:-master}
     command: signer
     volumes:
       - ./database:/app/database:rw
