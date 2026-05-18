@@ -185,7 +185,7 @@ access control matter more than cosmetic cleanup.
 Docker deployment uses:
 
 - `docker-compose.yml` for local source builds of API, web, and signer containers,
-- `docker-compose.prod.yml` for pulling the published `ghcr.io/erskingardner/keycast` image,
+- `docker-compose.prod.yml` for pulling the published `ghcr.io/marmot-protocol/keycast` image,
 - `master.key` mounted into API and signer containers,
 - an external Docker network named `keycast`,
 - Caddy labels for routing `/api/*` to the API and the rest to the web app.

@@ -66,7 +66,7 @@ RUN bun install --production --frozen-lockfile
 
 # Final stage
 FROM debian:bookworm-slim@sha256:67b30a61dc87758f0caf819646104f29ecbda97d920aaf5edc834128ac8493d3 AS runtime
-LABEL org.opencontainers.image.source="https://github.com/erskingardner/keycast"
+LABEL org.opencontainers.image.source="https://github.com/marmot-protocol/keycast"
 WORKDIR /app
 
 # Install only the essential runtime dependencies

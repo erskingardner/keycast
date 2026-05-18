@@ -8,7 +8,7 @@ install path.
 - Containers now run as a non-root user and use a read-only root filesystem.
 - `master.key` is mounted from the host instead of being copied into the image.
 - `ALLOWED_PUBKEYS` is enforced by the API, not just the browser.
-- `docker-compose.prod.yml` can pull the published `ghcr.io/erskingardner/keycast` image instead of
+- `docker-compose.prod.yml` can pull the published `ghcr.io/marmot-protocol/keycast` image instead of
   building Rust and Bun on the server.
 - The Nostr Rust stack moved to current crates.io releases.
 - Migration `0002_normalize_allowed_kinds_permissions.sql` normalizes old `allowed_kinds` permission
@@ -74,6 +74,10 @@ docker compose -f docker-compose.prod.yml pull
 docker compose -f docker-compose.prod.yml up -d
 docker compose -f docker-compose.prod.yml ps
 ```
+
+Production Compose pulls `ghcr.io/marmot-protocol/keycast` by default. If `pull` returns
+`unauthorized`, change the GitHub Packages visibility to public or log the deployment host in to
+GHCR before retrying.
 
 The API and signer run SQLx migrations on startup. The new migration only normalizes old permission
 JSON. It does not rotate keys, change stored-key ciphertext, or invalidate existing bunker connection
