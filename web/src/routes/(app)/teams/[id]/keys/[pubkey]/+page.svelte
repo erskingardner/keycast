@@ -106,9 +106,10 @@ async function revokeAuthorization(authorization: AuthorizationWithRelations) {
 
     const authorizationId = authorization.authorization.id;
     const endpoint = `/teams/${id}/keys/${pubkey}/authorizations/${authorizationId}`;
-    const authHeader = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
 
     try {
+        const authHeader = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+
         await api.delete(endpoint, {
             headers: {
                 Authorization: authHeader,

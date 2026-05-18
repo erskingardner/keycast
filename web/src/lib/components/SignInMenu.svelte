@@ -118,7 +118,11 @@ async function startConnectSession(options: ConnectSessionStartOptions) {
                 error instanceof Error ? error.message : "Unable to connect signer";
         }
     } finally {
-        if (connectController === controller) {
+        const shouldClearConnectState =
+            connectController === controller ||
+            (controller.signal.aborted && connectController === null);
+
+        if (shouldClearConnectState) {
             busy = null;
             connectController = null;
         }
