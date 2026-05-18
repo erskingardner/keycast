@@ -40,6 +40,8 @@ pub struct CreatePolicyRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct AddAuthorizationRequest {
+    #[serde(default)]
+    pub name: Option<String>,
     pub policy_id: u32,
     pub relays: Vec<String>,
     pub max_uses: Option<i32>,

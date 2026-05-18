@@ -98,6 +98,33 @@ async function removeKey() {
             toast.error("Failed to remove key");
         });
 }
+
+async function revokeAuthorization(authorization: AuthorizationWithRelations) {
+    if (!user?.pubkey) return;
+    if (!confirm("Revoke this authorization? Existing clients using it will lose access."))
+        return;
+
+    const authorizationId = authorization.authorization.id;
+    const endpoint = `/teams/${id}/keys/${pubkey}/authorizations/${authorizationId}`;
+
+    try {
+        const authHeader = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+
+        await api.delete(endpoint, {
+            headers: {
+                Authorization: authHeader,
+            },
+        });
+
+        authorizations = authorizations.filter(
+            (item) => item.authorization.id !== authorizationId,
+        );
+        toast.success("Authorization revoked");
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        toast.error(`Failed to revoke authorization: ${message}`);
+    }
+}
 </script>
 
 {#if isLoading}
@@ -147,7 +174,10 @@ async function removeKey() {
             {:else}
                 <div class="card-grid">
                     {#each authorizations as authorization}
-                        <AuthorizationCard {authorization} />
+                        <AuthorizationCard
+                            {authorization}
+                            onRevoke={revokeAuthorization}
+                        />
                     {/each}
                 </div>
             {/if}

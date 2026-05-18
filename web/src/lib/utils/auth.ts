@@ -3,15 +3,13 @@ import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
 import {
     clearActiveSigner,
     connectNostrConnectBunker,
-    getAmberUser,
     getExtensionUser,
-    isAmberSigninSupported,
     type NostrUser,
 } from "$lib/nostr";
 import toast from "svelte-hot-french-toast";
 import { checkPubkeyAllowed } from "./allowlist";
 
-export type SigninMethod = "extension" | "nip46-bunker" | "amber";
+export type SigninMethod = "extension" | "nip46-bunker";
 export type SigninOptions = {
     bunkerUri?: string;
 };
@@ -72,12 +70,6 @@ async function userFromSigninMethod(
                     return null;
                 }
                 return connectNostrConnectBunker(options.bunkerUri);
-            case "amber":
-                if (!isAmberSigninSupported()) {
-                    toast.error("Amber sign-in is only available on supported Android browsers");
-                    return null;
-                }
-                return getAmberUser();
             default:
                 method satisfies never;
                 return null;

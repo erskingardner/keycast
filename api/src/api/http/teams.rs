@@ -564,6 +564,7 @@ pub async fn add_authorization(
     Json(request): Json<AddAuthorizationRequest>,
 ) -> ApiResult<Json<Authorization>> {
     verify_admin(&pool, &event.pubkey, team_id).await?;
+    let authorization_name = normalized_authorization_name(request.name.as_deref());
 
     let stored_key_public_key =
         PublicKey::from_hex(&pubkey).map_err(|e| ApiError::bad_request(e.to_string()))?;
@@ -612,12 +613,13 @@ pub async fn add_authorization(
     // Create authorization
     let authorization = sqlx::query_as::query_as::<_, Authorization>(
             r#"
-            INSERT INTO authorizations (stored_key_id, policy_id, secret, bunker_public_key, bunker_secret, relays, max_uses, expires_at, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))
+            INSERT INTO authorizations (stored_key_id, name, policy_id, secret, bunker_public_key, bunker_secret, relays, max_uses, expires_at, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), datetime('now'))
             RETURNING *
             "#,
         )
         .bind(stored_key.id)
+        .bind(authorization_name)
         .bind(request.policy_id)
         .bind(secret)
         .bind(bunker_keys.public_key().to_hex())
@@ -631,6 +633,59 @@ pub async fn add_authorization(
     tx.commit().await?;
 
     Ok(Json(authorization))
+}
+
+pub async fn remove_authorization(
+    State(pool): State<SqlitePool>,
+    AuthEvent(event): AuthEvent,
+    Path((team_id, pubkey, authorization_id)): Path<(u32, String, u32)>,
+) -> ApiResult<StatusCode> {
+    verify_admin(&pool, &event.pubkey, team_id).await?;
+
+    let stored_key_public_key =
+        PublicKey::from_hex(&pubkey).map_err(|e| ApiError::bad_request(e.to_string()))?;
+
+    let mut tx = pool.begin().await?;
+
+    let existing_authorization_id: Option<u32> = sqlx::query_scalar::query_scalar(
+        r#"
+        SELECT a.id
+        FROM authorizations a
+        JOIN stored_keys sk ON sk.id = a.stored_key_id
+        WHERE a.id = ?1
+          AND sk.team_id = ?2
+          AND sk.public_key = ?3
+        "#,
+    )
+    .bind(authorization_id)
+    .bind(team_id)
+    .bind(stored_key_public_key.to_hex())
+    .fetch_optional(&mut *tx)
+    .await?;
+
+    if existing_authorization_id.is_none() {
+        return Err(ApiError::not_found("Authorization not found"));
+    }
+
+    sqlx::query::query("DELETE FROM user_authorizations WHERE authorization_id = ?1")
+        .bind(authorization_id)
+        .execute(&mut *tx)
+        .await?;
+
+    sqlx::query::query("DELETE FROM authorizations WHERE id = ?1")
+        .bind(authorization_id)
+        .execute(&mut *tx)
+        .await?;
+
+    tx.commit().await?;
+
+    Ok(StatusCode::NO_CONTENT)
+}
+
+fn normalized_authorization_name(name: Option<&str>) -> Option<String> {
+    name.map(str::trim)
+        .filter(|trimmed| !trimmed.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 pub async fn add_policy(
@@ -732,10 +787,26 @@ pub async fn verify_teammate<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::{KeycastState, KEYCAST_STATE};
     use axum::extract::Path;
+    use keycast_core::encryption::{KeyManager, KeyManagerError};
     use keycast_core::types::user::TeamUserRole;
     use sqlx::raw_sql::raw_sql;
     use sqlx_sqlite::SqlitePoolOptions;
+    use std::sync::Arc;
+
+    struct TestKeyManager;
+
+    #[async_trait::async_trait]
+    impl KeyManager for TestKeyManager {
+        async fn encrypt(&self, plaintext_bytes: &[u8]) -> Result<Vec<u8>, KeyManagerError> {
+            Ok(plaintext_bytes.to_vec())
+        }
+
+        async fn decrypt(&self, ciphertext_bytes: &[u8]) -> Result<Vec<u8>, KeyManagerError> {
+            Ok(ciphertext_bytes.to_vec())
+        }
+    }
 
     async fn setup_test_db() -> SqlitePool {
         let pool = SqlitePoolOptions::new()
@@ -754,6 +825,17 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        raw_sql(include_str!(
+            "../../../../database/migrations/0003_add_authorization_name.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let _ = KEYCAST_STATE.set(Arc::new(KeycastState {
+            db: pool.clone(),
+            key_manager: Box::new(TestKeyManager),
+        }));
 
         pool
     }
@@ -961,6 +1043,7 @@ mod tests {
             AuthEvent(auth_event(&admin)),
             Path((first_team.team.id, stored_key.public_key().to_hex())),
             Json(AddAuthorizationRequest {
+                name: Some("Other team policy".to_string()),
                 policy_id: second_team.policies[0].policy.id,
                 relays: vec!["wss://relay.example".to_string()],
                 max_uses: None,
@@ -972,6 +1055,212 @@ mod tests {
 
         assert!(matches!(err, ApiError::NotFound(_)));
         assert_eq!(count_rows(&pool, "authorizations").await, 0);
+    }
+
+    #[tokio::test]
+    async fn add_authorization_persists_trimmed_name() {
+        let pool = setup_test_db().await;
+        let admin = Keys::generate();
+        let team = create_team_for(&pool, &admin, "Ops").await;
+        let stored_key = Keys::generate();
+
+        sqlx::query::query(
+            "INSERT INTO stored_keys (name, team_id, public_key, secret_key, created_at, updated_at)
+             VALUES ('key', ?1, ?2, ?3, datetime('now'), datetime('now'))",
+        )
+        .bind(team.team.id)
+        .bind(stored_key.public_key().to_hex())
+        .bind(vec![1_u8, 2, 3])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let authorization = add_authorization(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path((team.team.id, stored_key.public_key().to_hex())),
+            Json(AddAuthorizationRequest {
+                name: Some("  Alice tablet  ".to_string()),
+                policy_id: team.policies[0].policy.id,
+                relays: vec!["wss://relay.example".to_string()],
+                max_uses: None,
+                expires_at: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        assert_eq!(authorization.name.as_deref(), Some("Alice tablet"));
+
+        let stored_name: Option<String> =
+            sqlx::query_scalar::query_scalar("SELECT name FROM authorizations WHERE id = ?1")
+                .bind(authorization.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(stored_name.as_deref(), Some("Alice tablet"));
+    }
+
+    #[tokio::test]
+    async fn remove_authorization_deletes_selected_authorization_and_redemptions_only() {
+        let pool = setup_test_db().await;
+        let admin = Keys::generate();
+        let team = create_team_for(&pool, &admin, "Ops").await;
+        let stored_key = Keys::generate();
+        let auth_user = Keys::generate();
+
+        sqlx::query::query(
+            "INSERT INTO stored_keys (name, team_id, public_key, secret_key, created_at, updated_at)
+             VALUES ('key', ?1, ?2, ?3, datetime('now'), datetime('now'))",
+        )
+        .bind(team.team.id)
+        .bind(stored_key.public_key().to_hex())
+        .bind(vec![1_u8, 2, 3])
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let first = add_authorization(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path((team.team.id, stored_key.public_key().to_hex())),
+            Json(AddAuthorizationRequest {
+                name: Some("Alice phone".to_string()),
+                policy_id: team.policies[0].policy.id,
+                relays: vec!["wss://relay.example".to_string()],
+                max_uses: None,
+                expires_at: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+        let second = add_authorization(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path((team.team.id, stored_key.public_key().to_hex())),
+            Json(AddAuthorizationRequest {
+                name: Some("Bob laptop".to_string()),
+                policy_id: team.policies[0].policy.id,
+                relays: vec!["wss://relay.example".to_string()],
+                max_uses: None,
+                expires_at: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        sqlx::query::query(
+            "INSERT INTO users (public_key, created_at, updated_at)
+             VALUES (?1, datetime('now'), datetime('now'))",
+        )
+        .bind(auth_user.public_key().to_hex())
+        .execute(&pool)
+        .await
+        .unwrap();
+        sqlx::query::query(
+            "INSERT INTO user_authorizations (user_public_key, authorization_id, created_at, updated_at)
+             VALUES (?1, ?2, datetime('now'), datetime('now'))",
+        )
+        .bind(auth_user.public_key().to_hex())
+        .bind(first.id)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let status = remove_authorization(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path((team.team.id, stored_key.public_key().to_hex(), first.id)),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        let first_count: i64 =
+            sqlx::query_scalar::query_scalar("SELECT COUNT(*) FROM authorizations WHERE id = ?1")
+                .bind(first.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let second_count: i64 =
+            sqlx::query_scalar::query_scalar("SELECT COUNT(*) FROM authorizations WHERE id = ?1")
+                .bind(second.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        let redemption_count: i64 = sqlx::query_scalar::query_scalar(
+            "SELECT COUNT(*) FROM user_authorizations WHERE authorization_id = ?1",
+        )
+        .bind(first.id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+        assert_eq!(first_count, 0);
+        assert_eq!(second_count, 1);
+        assert_eq!(redemption_count, 0);
+    }
+
+    #[tokio::test]
+    async fn remove_authorization_rejects_authorization_from_another_key_path() {
+        let pool = setup_test_db().await;
+        let admin = Keys::generate();
+        let team = create_team_for(&pool, &admin, "Ops").await;
+        let first_key = Keys::generate();
+        let second_key = Keys::generate();
+
+        for key in [&first_key, &second_key] {
+            sqlx::query::query(
+                "INSERT INTO stored_keys (name, team_id, public_key, secret_key, created_at, updated_at)
+                 VALUES ('key', ?1, ?2, ?3, datetime('now'), datetime('now'))",
+            )
+            .bind(team.team.id)
+            .bind(key.public_key().to_hex())
+            .bind(vec![1_u8, 2, 3])
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let authorization = add_authorization(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path((team.team.id, first_key.public_key().to_hex())),
+            Json(AddAuthorizationRequest {
+                name: Some("Alice phone".to_string()),
+                policy_id: team.policies[0].policy.id,
+                relays: vec!["wss://relay.example".to_string()],
+                max_uses: None,
+                expires_at: None,
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let err = remove_authorization(
+            State(pool.clone()),
+            AuthEvent(auth_event(&admin)),
+            Path((
+                team.team.id,
+                second_key.public_key().to_hex(),
+                authorization.id,
+            )),
+        )
+        .await
+        .unwrap_err();
+
+        assert!(matches!(err, ApiError::NotFound(_)));
+        let authorization_count: i64 =
+            sqlx::query_scalar::query_scalar("SELECT COUNT(*) FROM authorizations WHERE id = ?1")
+                .bind(authorization.id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(authorization_count, 1);
     }
 
     #[tokio::test]

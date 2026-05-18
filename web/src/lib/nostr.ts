@@ -5,15 +5,10 @@ import type {
     ProfileContent,
 } from "applesauce-core/helpers";
 import { normalizeToPubkey, npubEncode } from "applesauce-core/helpers";
-import { getEventHash, verifyEvent } from "applesauce-core/helpers/event";
 import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { RelayPool } from "applesauce-relay";
 import type { ISigner } from "applesauce-signers";
-import {
-    AmberClipboardSigner,
-    ExtensionSigner,
-    NostrConnectSigner,
-} from "applesauce-signers";
+import { ExtensionSigner, NostrConnectSigner } from "applesauce-signers";
 import { catchError, filter, firstValueFrom, of, timeout } from "rxjs";
 import {
     DEFAULT_NOSTR_READ_RELAYS,
@@ -41,10 +36,13 @@ export type NostrConnectSigninSession = {
     waitForUser: (abort?: AbortSignal) => Promise<NostrUser>;
     cancel: () => void;
 };
+export type NostrConnectSigninOptions = {
+    relays?: readonly string[];
+    signerKind?: "nostr-connect" | "amber";
+};
 
 const PROFILE_LOAD_TIMEOUT_MS = 5000;
 const CONTACTS_LOAD_TIMEOUT_MS = 5000;
-const HEX_SIGNATURE = /^[0-9a-f]{128}$/i;
 export const DEFAULT_NOSTR_CONNECT_RELAYS = [
     "wss://relay.nsec.app",
     ...REQUIRED_PUBLIC_RELAYS,
@@ -99,7 +97,7 @@ export function hasNip07Extension(): boolean {
 export function isAmberSigninSupported(): boolean {
     return (
         typeof navigator !== "undefined" &&
-        /Android/i.test(navigator.userAgent)
+        /\bAndroid\b/i.test(navigator.userAgent)
     );
 }
 
@@ -137,10 +135,6 @@ export async function getExtensionUser(): Promise<NostrUser> {
     return userFromSigner(getExtensionSigner(), "extension");
 }
 
-export async function getAmberUser(): Promise<NostrUser> {
-    return userFromSigner(new ManualAmberSigner(), "amber");
-}
-
 export async function connectNostrConnectBunker(
     bunkerUri: string,
 ): Promise<NostrUser> {
@@ -154,8 +148,10 @@ export async function connectNostrConnectBunker(
 }
 
 export function createNostrConnectSigninSession(
-    relays: readonly string[] = DEFAULT_NOSTR_CONNECT_RELAYS,
+    options: NostrConnectSigninOptions = {},
 ): NostrConnectSigninSession {
+    const relays = options.relays ?? DEFAULT_NOSTR_CONNECT_RELAYS;
+    const signerKind = options.signerKind ?? "nostr-connect";
     const signer = new NostrConnectSigner({
         relays: [...relays],
         pool: relayPool,
@@ -171,7 +167,7 @@ export function createNostrConnectSigninSession(
         uri,
         waitForUser: async (abort?: AbortSignal) => {
             await signer.waitForSigner(abort);
-            return userFromSigner(signer, "nostr-connect");
+            return userFromSigner(signer, signerKind);
         },
         cancel: () => {
             void signer.close();
@@ -253,138 +249,6 @@ async function userFromSigner(signer: ISigner, kind: SignerKind): Promise<NostrU
 
     setActiveSigner({ kind, signer, pubkey });
     return user;
-}
-
-class ManualAmberSigner implements ISigner {
-    pubkey?: string;
-
-    async getPublicKey(): Promise<string> {
-        if (!isAmberSigninSupported()) {
-            throw new Error("Amber signing is only available on Android");
-        }
-
-        if (this.pubkey) return this.pubkey;
-
-        const result = await requestAmberResult(
-            AmberClipboardSigner.createGetPublicKeyIntent(),
-            "public key",
-            (value) => normalizePubkey(value) !== null,
-        );
-        const pubkey = normalizePubkey(result);
-        if (!pubkey) throw new Error("Expected Amber to return a pubkey");
-
-        this.pubkey = pubkey;
-        return pubkey;
-    }
-
-    async signEvent(
-        template: EventTemplate & { pubkey?: string },
-    ): Promise<NostrEvent> {
-        if (!isAmberSigninSupported()) {
-            throw new Error("Amber signing is only available on Android");
-        }
-
-        const signerPubkey = template.pubkey ?? this.pubkey;
-        const pubkey = signerPubkey ? normalizePubkey(signerPubkey) : null;
-        if (!pubkey) throw new Error("Unknown Amber signer pubkey");
-
-        const draftWithPubkey = { ...template, pubkey };
-        const draftWithId = {
-            ...draftWithPubkey,
-            id: getEventHash(draftWithPubkey),
-        };
-        const result = await requestAmberResult(
-            AmberClipboardSigner.createSignEventIntent(
-                draftWithId as EventTemplate,
-            ),
-            "signature",
-            (value) => HEX_SIGNATURE.test(value),
-        );
-        const signature = result.trim();
-        const event = { ...draftWithId, sig: signature };
-        if (!verifyEvent(event)) {
-            throw new Error("Amber returned an invalid signature");
-        }
-
-        return event;
-    }
-}
-
-async function requestAmberResult(
-    intent: string,
-    label: string,
-    accepts: (value: string) => boolean,
-): Promise<string> {
-    if (typeof window === "undefined" || typeof document === "undefined") {
-        throw new Error("Amber signing requires a browser");
-    }
-
-    window.open(intent, "_blank");
-    const returnedFromAmber = await waitForBrowserToReturn();
-
-    if (returnedFromAmber) {
-        const clipboardResult = (await readClipboardText()).trim();
-        if (clipboardResult && accepts(clipboardResult)) {
-            return clipboardResult;
-        }
-    }
-
-    const manualResult = window.prompt(`Paste the Amber ${label} result`);
-    const trimmedManualResult = manualResult?.trim() ?? "";
-    if (trimmedManualResult && accepts(trimmedManualResult)) {
-        return trimmedManualResult;
-    }
-
-    throw new Error(`Amber ${label} result was invalid or not provided`);
-}
-
-async function waitForBrowserToReturn(): Promise<boolean> {
-    return new Promise<boolean>((resolve) => {
-        let sawHidden = document.visibilityState === "hidden";
-        let settled = false;
-
-        const done = (returnedFromAmber: boolean) => {
-            if (settled) return;
-            settled = true;
-            document.removeEventListener("visibilitychange", onVisibilityChange);
-            window.removeEventListener("focus", onFocus);
-            resolve(returnedFromAmber);
-        };
-
-        const onVisibilityChange = () => {
-            if (document.visibilityState === "hidden") {
-                sawHidden = true;
-            } else if (sawHidden) {
-                setTimeout(() => done(true), 250);
-            }
-        };
-
-        const onFocus = () => {
-            if (sawHidden) {
-                setTimeout(() => done(true), 250);
-            }
-        };
-
-        document.addEventListener("visibilitychange", onVisibilityChange);
-        window.addEventListener("focus", onFocus);
-        setTimeout(() => {
-            if (!sawHidden && document.visibilityState === "visible") {
-                done(false);
-            }
-        }, 1500);
-    });
-}
-
-async function readClipboardText(): Promise<string> {
-    try {
-        if (navigator.clipboard?.readText) {
-            return await navigator.clipboard.readText();
-        }
-    } catch {
-        // Android browsers often require a user gesture before granting clipboard access.
-    }
-
-    return "";
 }
 
 function disposeSigner(signer: ISigner | null | undefined): void {

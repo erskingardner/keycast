@@ -17,6 +17,7 @@ export type User = {
 export type Authorization = {
     id: number;
     stored_key_id: number;
+    name: string | null;
     secret: string;
     bunker_nsec: string;
     relays: string[];

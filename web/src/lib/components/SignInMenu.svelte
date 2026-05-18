@@ -3,6 +3,7 @@ import {
     createNostrConnectSigninSession,
     hasNip07Extension,
     isAmberSigninSupported,
+    type NostrConnectSigninOptions,
     type NostrConnectSigninSession,
 } from "$lib/nostr";
 import {
@@ -22,7 +23,12 @@ import {
     X,
 } from "phosphor-svelte";
 
-type BusyState = SigninMethod | "nostr-connect-link" | null;
+type BusyState = SigninMethod | "nostr-connect-link" | "amber" | null;
+type ConnectSessionStartOptions = {
+    autoOpen?: boolean;
+    busyState: Exclude<BusyState, null>;
+    signerKind?: NostrConnectSigninOptions["signerKind"];
+};
 
 let open = $state(false);
 let bunkerUri = $state("");
@@ -72,15 +78,33 @@ async function submitBunker(event: SubmitEvent) {
 }
 
 async function startConnectLink() {
+    await startConnectSession({ busyState: "nostr-connect-link" });
+}
+
+async function startAmberConnect() {
+    await startConnectSession({
+        autoOpen: true,
+        busyState: "amber",
+        signerKind: "amber",
+    });
+}
+
+async function startConnectSession(options: ConnectSessionStartOptions) {
     cancelConnectLink();
     connectError = null;
     connectCopied = false;
-    connectSession = createNostrConnectSigninSession();
+    connectSession = createNostrConnectSigninSession({
+        signerKind: options.signerKind,
+    });
     connectUri = connectSession.uri;
 
     const controller = new AbortController();
     connectController = controller;
-    busy = "nostr-connect-link";
+    busy = options.busyState;
+
+    if (options.autoOpen) {
+        openConnectUri(connectUri);
+    }
 
     try {
         const user = await connectSession.waitForUser(controller.signal);
@@ -94,11 +118,19 @@ async function startConnectLink() {
                 error instanceof Error ? error.message : "Unable to connect signer";
         }
     } finally {
-        if (connectController === controller) {
+        const shouldClearConnectState =
+            connectController === controller ||
+            (controller.signal.aborted && connectController === null);
+
+        if (shouldClearConnectState) {
             busy = null;
             connectController = null;
         }
     }
+}
+
+function openConnectUri(uri: string) {
+    window.location.href = uri;
 }
 
 function cancelConnectLink() {
@@ -251,19 +283,19 @@ async function copyConnectUri() {
 
                 <button
                     type="button"
-                    onclick={() => runSignin("amber")}
+                    onclick={startAmberConnect}
                     disabled={busy !== null || !amberAvailable}
                     class={signinOptionClass}
                 >
                     <DeviceMobile size="24" />
                     <span class="min-w-0 flex-1">
-                        <span class="block font-medium">Amber</span>
+                        <span class="block font-medium">Connect with Amber</span>
                         <span class="block text-xs text-gray-400">
-                            {amberAvailable ? "Android signer ready" : "Android signer"}
+                            {amberAvailable ? "Nostr Connect ready" : "Android signer"}
                         </span>
                     </span>
                     <span class="text-xs text-gray-500">
-                        {busy === "amber" ? "Opening" : "NIP-55"}
+                        {busy === "amber" ? "Opening" : "NIP-46"}
                     </span>
                 </button>
             </div>

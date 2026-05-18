@@ -3,6 +3,7 @@ import type { EventTemplate, NostrEvent } from "applesauce-core/helpers";
 import {
     buildNip46SigningPermissions,
     clearActiveSigner,
+    createNostrConnectSigninSession,
     getActiveSignerSummary,
     npubForPubkey,
     normalizeBunkerUri,
@@ -63,6 +64,18 @@ describe("Nostr helper utilities", () => {
             "get_public_key",
             "sign_event:27235",
         ]);
+    });
+
+    test("creates Amber sign-in sessions through Nostr Connect", () => {
+        const session = createNostrConnectSigninSession({ signerKind: "amber" });
+        const uri = new URL(session.uri);
+
+        session.cancel();
+
+        expect(uri.protocol).toBe("nostrconnect:");
+        expect(uri.searchParams.get("perms")).toBe(
+            "get_public_key,sign_event:27235",
+        );
     });
 
     test("signs events with the active signer", async () => {

@@ -71,6 +71,8 @@ pub struct Authorization {
     pub id: u32,
     /// The id of the stored key the authorization belongs to
     pub stored_key_id: u32,
+    /// A human-readable label for remembering what the authorization is for
+    pub name: Option<String>,
     /// The generated secret connection uuid
     pub secret: String,
     /// The public key of the bunker nostr secret key
@@ -102,6 +104,7 @@ impl<'r> FromRow<'r, SqliteRow> for Authorization {
         Ok(Self {
             id: row.try_get("id")?,
             stored_key_id: row.try_get("stored_key_id")?,
+            name: row.try_get("name")?,
             secret: row.try_get("secret")?,
             bunker_public_key: row.try_get("bunker_public_key")?,
             bunker_secret: row.try_get("bunker_secret")?,
@@ -476,6 +479,12 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        raw_sql(include_str!(
+            "../../../database/migrations/0003_add_authorization_name.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         pool
     }
@@ -520,12 +529,13 @@ mod tests {
         sqlx::query_as::query_as::<_, Authorization>(
             r#"
             INSERT INTO authorizations
-            (stored_key_id, secret, bunker_public_key, bunker_secret, relays, policy_id, max_uses, expires_at, created_at, updated_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, datetime('now'), datetime('now'))
+            (stored_key_id, name, secret, bunker_public_key, bunker_secret, relays, policy_id, max_uses, expires_at, created_at, updated_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, datetime('now'), datetime('now'))
             RETURNING *
             "#,
         )
         .bind(stored_key_id)
+        .bind(Option::<String>::None)
         .bind(format!("test_secret_{}", uuid::Uuid::new_v4()))
         .bind(keys.public_key().to_hex())
         .bind(keys.secret_key().to_secret_bytes().to_vec())
