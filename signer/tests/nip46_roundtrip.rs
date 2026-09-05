@@ -20,7 +20,6 @@ async fn connect_then_sign_round_trips_through_a_real_local_relay() {
 
     let pool = SqlitePoolOptions::new()
         .max_connections(1)
-        .max_connections(5)
         .connect("sqlite::memory:")
         .await
         .expect("connect test database");
