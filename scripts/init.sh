@@ -4,17 +4,19 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DOMAIN=""
 ALLOWED_PUBKEYS=""
+OPERATOR_PUBKEYS=""
 KEYCAST_UID=10001
 KEYCAST_GID=10001
 
 usage() {
-    echo "Usage: $0 --domain <domain> --allowed-pubkeys <hex[,hex...]>"
+    echo "Usage: $0 --domain <domain> --allowed-pubkeys <hex[,hex...]> [--operator-pubkeys <hex[,hex...]>]"
 }
 
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --domain) DOMAIN="${2:-}"; shift 2 ;;
         --allowed-pubkeys) ALLOWED_PUBKEYS="${2:-}"; shift 2 ;;
+        --operator-pubkeys) OPERATOR_PUBKEYS="${2:-}"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
     esac
@@ -31,11 +33,10 @@ if [[ -z "$ALLOWED_PUBKEYS" ]]; then
     echo "Error: --allowed-pubkeys is required; Keycast fails closed without it"
     exit 1
 fi
-IFS=',' read -r -a pubkeys <<< "$ALLOWED_PUBKEYS"
-for pubkey in "${pubkeys[@]}"; do
-    normalized="${pubkey//[[:space:]]/}"
-    if [[ ! "$normalized" =~ ^[0-9a-fA-F]{64}$ ]]; then
-        echo "Error: every allowed pubkey must be 64 hexadecimal characters"
+OPERATOR_PUBKEYS="${OPERATOR_PUBKEYS:-${ALLOWED_PUBKEYS%%,*}}"
+for pubkey_list in "$ALLOWED_PUBKEYS" "$OPERATOR_PUBKEYS"; do
+    if [[ ! "$pubkey_list" =~ ^[0-9a-fA-F]{64}(,[0-9a-fA-F]{64})*$ ]]; then
+        echo "Error: pubkeys must be comma-separated 64-character hex values without whitespace or empty fields"
         exit 1
     fi
 done
@@ -59,7 +60,7 @@ fi
 {
     echo "DOMAIN=$DOMAIN"
     echo "ALLOWED_PUBKEYS=$ALLOWED_PUBKEYS"
-    echo "KEYCAST_OPERATOR_PUBKEYS=$ALLOWED_PUBKEYS"
+    echo "KEYCAST_OPERATOR_PUBKEYS=$OPERATOR_PUBKEYS"
     echo "KEYCAST_API_IMAGE=ghcr.io/marmot-protocol/keycast-api"
     echo "KEYCAST_SIGNER_IMAGE=ghcr.io/marmot-protocol/keycast-signer"
     echo "KEYCAST_WEB_IMAGE=ghcr.io/marmot-protocol/keycast-web"

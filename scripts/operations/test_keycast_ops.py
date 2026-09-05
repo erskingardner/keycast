@@ -19,19 +19,22 @@ class OperationsTests(unittest.TestCase):
     def test_upload_failure_preserves_old_backups_and_success_stamp(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            for n in range(4): (directory / f"keycast-{n}.kcb").write_text("old")
+            for n in range(4):
+                (directory / f"keycast-{n}.kcb").write_text("old")
             stamp = directory / "last-offhost-success.json"
             stamp.write_text('{"completed_at":123}')
             config = {"backup_directory": tmp, "backup_key_file": "/not-read/test.key", "remote_directory": "test:offhost", "keep_local": 2}
             with patch.object(ops, "run", side_effect=[None, RuntimeError("upload failed")]):
-                with self.assertRaises(RuntimeError): ops.backup(config)
+                with self.assertRaises(RuntimeError):
+                    ops.backup(config)
             self.assertEqual(json.loads(stamp.read_text())["completed_at"], 123)
             self.assertEqual(len(list(directory.glob("*.kcb"))), 4)
 
     def test_verified_upload_precedes_success_and_local_retention(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
-            for n in range(4): (directory / f"keycast-{n}.kcb").write_text("old")
+            for n in range(4):
+                (directory / f"keycast-{n}.kcb").write_text("old")
             config = {"backup_directory": tmp, "backup_key_file": "/not-read/test.key", "remote_directory": "test:offhost", "keep_local": 2}
             with patch.object(ops, "run") as run:
                 self.assertTrue(ops.backup(config)["ok"])
@@ -41,4 +44,5 @@ class OperationsTests(unittest.TestCase):
             self.assertEqual(len(list(directory.glob("*.kcb"))), 2)
 
 
-if __name__ == "__main__": unittest.main()
+if __name__ == "__main__":
+    unittest.main()

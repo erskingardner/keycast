@@ -7,7 +7,7 @@
 		"dev": "concurrently -n 'rust,web,signer' -c 'blue,green,yellow' \"bun run dev:api\" \"bun run dev:web\" \"bun run dev:signer\"",
 		"dev:open": "ALLOWED_PUBKEYS= KEYCAST_ALLOW_OPEN_REGISTRATION=true bun run dev",
 		"dev:api": "cd api && RUST_LOG=warn,keycast_api=debug,tower_http=debug KEYCAST_API_BIND=127.0.0.1:${PORT:-3100} KEYCAST_PUBLIC_URL=${KEYCAST_PUBLIC_URL:-http://localhost:${PORT:-3100}/api} KEYCAST_ALLOWED_ORIGINS=${KEYCAST_ALLOWED_ORIGINS:-http://localhost:5173} KEYCAST_SIGNER_SOCKET=${KEYCAST_SIGNER_SOCKET:-../runtime/signer.sock} cargo watch -x \"run\"",
-		"dev:web": "cd web && VITE_DOMAIN=${VITE_DOMAIN:-http://localhost:3100} bun run dev",
+		"dev:web": "cd web && VITE_DOMAIN=${VITE_DOMAIN:-http://localhost:${PORT:-3100}} bun run dev",
 		"dev:signer": "KEYCAST_PUBLIC_URL=${KEYCAST_PUBLIC_URL:-http://localhost:3100/api} RUST_LOG=warn,keycast_signer=debug KEYCAST_ROOT_KEY_FILE=./master.key KEYCAST_SIGNER_SOCKET=./runtime/signer.sock cargo watch -w Cargo.toml -w Cargo.lock -w core -w signer -w database/migrations -x \"run --bin keycast_signer\"",
 		"build": "concurrently -n 'rust,web,signer' -c 'blue,green,yellow' \"bun run build:api\" \"bun run build:web\" \"bun run build:signer\"",
 		"build:api": "cd api && cargo build --release",

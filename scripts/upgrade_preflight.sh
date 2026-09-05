@@ -41,19 +41,13 @@ if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ [^A-Za-z0-9.-] ]]; then
 else
     fail "DOMAIN is missing or is not a hostname"
 fi
-if [[ -n "$ALLOWED_PUBKEYS" ]]; then
-    pubkeys_valid=true
-    IFS=',' read -r -a pubkeys <<< "$ALLOWED_PUBKEYS"
-    for pubkey in "${pubkeys[@]}"; do
-        normalized="${pubkey//[[:space:]]/}"
-        [[ "$normalized" =~ ^[0-9a-fA-F]{64}$ ]] || pubkeys_valid=false
-    done
-    [[ "$pubkeys_valid" == true ]] \
-        && ok "ALLOWED_PUBKEYS contains valid hex pubkeys" \
-        || fail "ALLOWED_PUBKEYS must contain comma-separated 64-character hex pubkeys"
-else
-    fail "ALLOWED_PUBKEYS is missing; the API fails closed"
-fi
+for pubkey_name in ALLOWED_PUBKEYS KEYCAST_OPERATOR_PUBKEYS; do
+    if [[ "${!pubkey_name}" =~ ^[0-9a-fA-F]{64}(,[0-9a-fA-F]{64})*$ ]]; then
+        ok "$pubkey_name contains valid hex pubkeys"
+    else
+        fail "$pubkey_name must contain comma-separated 64-character hex pubkeys without whitespace or empty fields"
+    fi
+done
 
 if [[ -f "$ROOT_DIR/master.key" ]]; then
     key_value="$(tr -d '\r\n' < "$ROOT_DIR/master.key")"

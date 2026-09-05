@@ -12,3 +12,7 @@ master.key
 
 # Host-operation test bytecode
 __pycache__/
+
+# Interrupted credential creation and encrypted recovery archives
+.keycast-root.*
+*.kcb

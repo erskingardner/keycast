@@ -54,9 +54,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let bind = std::env::var("KEYCAST_API_BIND").unwrap_or_else(|_| "0.0.0.0:3000".to_string());
     let listener = tokio::net::TcpListener::bind(&bind).await?;
     tracing::info!(address = %listener.local_addr()?, "Keycast API ready");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await?;
     Ok(())
 }
 
