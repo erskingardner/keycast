@@ -47,6 +47,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             "KEYCAST_PUBLIC_URL must be an HTTPS /api URL (HTTP allowed only on loopback)".into(),
         );
     }
+    for name in ["ALLOWED_PUBKEYS", "KEYCAST_OPERATOR_PUBKEYS"] {
+        let raw = std::env::var(name).unwrap_or_default();
+        if !raw.is_empty()
+            && raw.split(',').any(|value| {
+                value.len() != 64 || nostr::prelude::PublicKey::from_hex(value).is_err()
+            })
+        {
+            return Err(format!("{name} must contain comma-separated 64-character hex pubkeys without whitespace or empty entries").into());
+        }
+    }
     let db_path = database_path_from_env(repository_root);
     if db_path
         .parent()
@@ -85,7 +95,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         database = %database_path_from_env(repository_root).display(),
         "Keycast multiplexed signer starting"
     );
-    keycast_signer::runtime::run(database, cipher, socket_path).await?;
+    keycast_signer::runtime::run(database, cipher, socket_path, public_url).await?;
     tracing::info!("Keycast signer stopped cleanly");
     Ok(())
 }

@@ -15,8 +15,7 @@ import {
     DEFAULT_OUTBOX_RELAYS,
     REQUIRED_PUBLIC_RELAYS,
 } from "$lib/utils/relays";
-import { MANAGEMENT_KIND } from "./utils/management";
-import { NIP_98_HTTP_AUTH_KIND } from "./utils/http_auth";
+import { MANAGEMENT_KIND, MANAGEMENT_READ_KIND } from "./utils/management";
 
 export type NostrUser = {
     pubkey: string;
@@ -112,7 +111,7 @@ export function normalizeBunkerUri(uri: string): string {
 }
 
 export function buildNip46SigningPermissions(): string[] {
-    return NostrConnectSigner.buildSigningPermissions([NIP_98_HTTP_AUTH_KIND, MANAGEMENT_KIND]);
+    return NostrConnectSigner.buildSigningPermissions([MANAGEMENT_KIND, MANAGEMENT_READ_KIND]);
 }
 
 export function getExtensionSigner(): ExtensionSigner {

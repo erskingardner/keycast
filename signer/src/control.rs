@@ -15,7 +15,8 @@ use zeroize::Zeroizing;
 pub async fn serve_control_socket(
     state: RuntimeState,
     socket_path: PathBuf,
-    mut shutdown: watch::Receiver<bool>,
+    public_url: url::Url,
+    shutdown: watch::Receiver<bool>,
 ) -> Result<(), std::io::Error> {
     if let Some(parent) = socket_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -52,11 +53,21 @@ pub async fn serve_control_socket(
     tracing::info!(path = %socket_path.display(), "signer control socket ready");
 
     let router = crate::management::api::http::routes(crate::management::state::KeycastState {
+        public_url: public_url.to_string(),
         db: state.store.pool.clone(),
         signer: crate::management::state::SignerClient {
             runtime: state.clone(),
         },
     });
+    serve_connections(listener, state, router, shutdown).await
+}
+
+async fn serve_connections(
+    listener: UnixListener,
+    state: RuntimeState,
+    router: axum::Router,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<(), std::io::Error> {
     let permits = Arc::new(Semaphore::new(8));
     let mut tasks = JoinSet::new();
     loop {
@@ -70,7 +81,7 @@ pub async fn serve_control_socket(
                     let _=tokio::time::timeout(Duration::from_secs(15),handle_connection(state,router,stream)).await;
                 });
             }
-            Some(result)=tasks.join_next(), if !tasks.is_empty()=>{if result.is_err() {return Err(std::io::Error::other("control task panicked"));}}
+            Some(result)=tasks.join_next(), if !tasks.is_empty()=>{if result.is_err() {tracing::error!("control connection task panicked; continuing to serve");}}
             _=shutdown.changed()=>{if *shutdown.borrow(){break;}}
         }
     }
@@ -268,5 +279,70 @@ pub(crate) fn safe_error(error: &crate::store::StoreError) -> ControlResponse {
     ControlResponse::Error {
         code: code.to_string(),
         message: message.to_string(),
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+    #[tokio::test]
+    async fn panicking_request_does_not_stop_control_service() {
+        let path = PathBuf::from("/tmp").join(format!(
+            "kc-control-{}.sock",
+            &nostr::prelude::Keys::generate().public_key().to_hex()[..16]
+        ));
+        let listener = UnixListener::bind(&path).unwrap();
+        let pool = sqlx_sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        let state = RuntimeState::new(crate::store::Store::new(
+            pool,
+            keycast_core::v2::envelope::EnvelopeCipher::from_key(Zeroizing::new([1; 32])),
+        ));
+        let router = axum::Router::new()
+            .route(
+                "/panic",
+                axum::routing::get(|| async {
+                    panic!("test connection panic");
+                    #[allow(unreachable_code)]
+                    ""
+                }),
+            )
+            .route("/ok", axum::routing::get(|| async { "healthy" }));
+        let (stop, rx) = watch::channel(false);
+        let task = tokio::spawn(serve_connections(listener, state, router, rx));
+        for endpoint in ["/panic", "/ok"] {
+            let mut stream = UnixStream::connect(&path).await.unwrap();
+            let request = ControlRequest::Http {
+                method: "GET".into(),
+                path: endpoint.into(),
+                authorization: None,
+                body: String::new(),
+            };
+            stream
+                .write_all(&serde_json::to_vec(&request).unwrap())
+                .await
+                .unwrap();
+            stream.shutdown().await.unwrap();
+            let mut response = Vec::new();
+            tokio::time::timeout(Duration::from_secs(2), stream.read_to_end(&mut response))
+                .await
+                .unwrap()
+                .unwrap();
+            if endpoint == "/ok" {
+                let ControlResponse::Http { reply } = serde_json::from_slice(&response).unwrap()
+                else {
+                    panic!("missing reply")
+                };
+                assert_eq!(reply.status, 200);
+                assert_eq!(reply.body, "healthy");
+            }
+        }
+        assert!(!task.is_finished());
+        stop.send(true).unwrap();
+        task.await.unwrap().unwrap();
+        std::fs::remove_file(path).unwrap();
     }
 }

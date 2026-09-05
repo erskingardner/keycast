@@ -51,6 +51,8 @@ pub enum ProtocolError {
     Malformed,
     #[error("store operation failed: {0}")]
     Store(#[from] StoreError),
+    #[error("request storage capacity exceeded")]
+    Capacity(Box<Event>),
     #[error("failed to build response")]
     Response,
     #[error("response exceeds the event size limit")]
@@ -127,8 +129,14 @@ impl RequestProcessor {
         client: &Client,
         event: &Event,
     ) -> Result<(), ProtocolError> {
-        if let Some(response) = self.prepare_response(event).await? {
-            let published = self.publish(client, event, &response).await.is_ok();
+        let response = match self.prepare_response(event).await {
+            Err(ProtocolError::Capacity(response)) => {
+                return self.publish_response(client, &response).await
+            }
+            result => result?,
+        };
+        if let Some(response) = response {
+            let published = self.publish_response(client, &response).await.is_ok();
             self.store
                 .mark_published(&event.id.to_hex(), published)
                 .await?;
@@ -147,13 +155,6 @@ impl RequestProcessor {
             .grant_for_recipient(&remote_pubkey.to_hex())
             .await?
             .ok_or(ProtocolError::UnknownGrant)?;
-        if let Some(cached) = self.store.cached_response(&event.id.to_hex()).await? {
-            self.store.retry_cached(&event.id.to_hex()).await?;
-            return Ok(Some(
-                Event::from_json(cached).map_err(|_| ProtocolError::Response)?,
-            ));
-        }
-
         let remote_keys = self.store.decrypt_remote_keys(&grant)?;
         let plaintext = nip44::decrypt(remote_keys.secret_key(), &event.pubkey, &event.content)
             .map_err(|_| ProtocolError::Decrypt)?;
@@ -172,20 +173,32 @@ impl RequestProcessor {
             self.store.active_session(grant.id, &event.pubkey).await?
         };
 
-        if request.method == "connect" {
-            if request.params.len() < 2
+        if request.method == "connect"
+            && (request.params.len() < 2
                 || !self
                     .store
                     .can_connect(grant.id, &event.pubkey, &request.params[1])
-                    .await?
-            {
-                return Err(ProtocolError::Malformed);
-            }
-        } else if current_session.is_none() {
+                    .await?)
+        {
+            return Err(ProtocolError::Malformed);
+        }
+
+        if let Some(cached) = self
+            .store
+            .cached_session_response(&event.id.to_hex())
+            .await?
+        {
+            self.store.retry_cached(&event.id.to_hex()).await?;
+            return Ok(Some(
+                Event::from_json(cached).map_err(|_| ProtocolError::Response)?,
+            ));
+        }
+
+        if request.method != "connect" && current_session.is_none() {
             return Err(ProtocolError::UnknownGrant);
         }
 
-        if !self
+        let admitted = self
             .store
             .begin_request(
                 &event.id.to_hex(),
@@ -196,9 +209,23 @@ impl RequestProcessor {
                 &request.method,
                 &event.as_json(),
             )
-            .await?
-        {
-            return Ok(None);
+            .await;
+        match admitted {
+            Ok(true) => {}
+            Ok(false) => return Ok(None),
+            Err(StoreError::Capacity) => {
+                self.metrics
+                    .ingress_rejections
+                    .fetch_add(1, Ordering::Relaxed);
+                return Err(ProtocolError::Capacity(Box::new(build_response(
+                    &remote_keys,
+                    &event.pubkey,
+                    &request.id,
+                    None,
+                    Some("request capacity exceeded; retry later"),
+                )?)));
+            }
+            Err(error) => return Err(error.into()),
         }
 
         let execution = self
@@ -492,15 +519,6 @@ impl RequestProcessor {
                 Some(session.id),
             )),
         }
-    }
-
-    async fn publish(
-        &self,
-        client: &Client,
-        _request: &Event,
-        response: &Event,
-    ) -> Result<(), ProtocolError> {
-        self.publish_response(client, response).await
     }
 
     pub async fn shutdown_replication(&self) {

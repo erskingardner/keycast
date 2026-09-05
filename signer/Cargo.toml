@@ -13,7 +13,6 @@ path = "src/main.rs"
 [dependencies]
 axum = "0.8.9"
 tower = { version = "0.5.3", features = ["util"] }
-sha256 = "1.6.0"
 url = "2.5.8"
 base64 = { workspace = true }
 chrono = { workspace = true }

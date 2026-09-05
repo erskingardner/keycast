@@ -58,6 +58,8 @@ pub enum StoreError {
     Policy(#[from] keycast_core::v2::policy::PolicyError),
     #[error("random number generation failed")]
     Random,
+    #[error("request storage capacity exceeded; retry later")]
+    Capacity,
     #[error("not found")]
     NotFound,
     #[error("invalid input: {0}")]
@@ -155,20 +157,21 @@ impl Store {
                 "grant expiration must be in the future".to_string(),
             ));
         }
-        if invitation_expires_at <= now
+        if invitation_expires_at > now + 7 * 24 * 3600
+            || invitation_expires_at <= now
             || expires_at.is_some_and(|grant_expiry| invitation_expires_at > grant_expiry)
         {
             return Err(StoreError::InvalidInput(
-                "invitation expiration must be in the grant lifetime".to_string(),
+                "invitation expiration must be within 7 days and within the grant lifetime"
+                    .to_string(),
             ));
         }
 
-        let (stored_team_id, _): (i64, String) =
-            query_as("SELECT team_id, public_key FROM stored_keys WHERE id = ?")
-                .bind(stored_key_id)
-                .fetch_optional(&self.pool)
-                .await?
-                .ok_or(StoreError::NotFound)?;
+        let stored_team_id: i64 = query_scalar("SELECT team_id FROM stored_keys WHERE id = ?")
+            .bind(stored_key_id)
+            .fetch_optional(&self.pool)
+            .await?
+            .ok_or(StoreError::NotFound)?;
         let (policy_team_id, policy_json): (i64, String) =
             query_as("SELECT team_id, document FROM policies WHERE id = ? AND deleted_at IS NULL")
                 .bind(policy_id)
@@ -192,8 +195,8 @@ impl Store {
         let grant_id: i64 = query_scalar(
             "INSERT INTO grants(
                 team_id, stored_key_id, policy_id, name, remote_signer_public_key,
-                remote_signer_secret_envelope, envelope_version, key_encryption_key_id, expires_at
-             ) VALUES (?, ?, ?, ?, ?, x'00', ?, ?, ?) RETURNING id",
+                remote_signer_secret_envelope, envelope_version, key_encryption_key_id, expires_at, created_at
+             ) VALUES (?, ?, ?, ?, ?, x'00', ?, ?, ?, ?) RETURNING id",
         )
         .bind(team_id)
         .bind(stored_key_id)
@@ -203,6 +206,7 @@ impl Store {
         .bind(ENVELOPE_VERSION)
         .bind(self.cipher.key_id())
         .bind(expires_at)
+        .bind(now)
         .fetch_one(&mut *transaction)
         .await?;
 
@@ -221,12 +225,13 @@ impl Store {
             .execute(&mut *transaction)
             .await?;
         let invitation_id: i64 = query_scalar(
-            "INSERT INTO invitations(grant_id, secret_hash, expires_at)
-             VALUES (?, ?, ?) RETURNING id",
+            "INSERT INTO invitations(grant_id, secret_hash, expires_at, created_at)
+             VALUES (?, ?, ?, ?) RETURNING id",
         )
         .bind(grant_id)
         .bind(invitation_hash)
         .bind(invitation_expires_at)
+        .bind(now)
         .fetch_one(&mut *transaction)
         .await?;
         audit(
@@ -264,21 +269,26 @@ impl Store {
         .fetch_optional(&self.pool)
         .await?
         .ok_or(StoreError::NotFound)?;
-        if expires_at <= now || grant_expiry.is_some_and(|expiry| expires_at > expiry) {
+        if expires_at > now + 7 * 24 * 3600
+            || expires_at <= now
+            || grant_expiry.is_some_and(|expiry| expires_at > expiry)
+        {
             return Err(StoreError::InvalidInput(
-                "invitation expiration must be in the grant lifetime".to_string(),
+                "invitation expiration must be within 7 days and within the grant lifetime"
+                    .to_string(),
             ));
         }
         let (secret, hash) = generate_invitation_secret()?;
         let bunker_uri = self.bunker_uri(&remote_public_key, &secret).await?;
         let mut transaction = self.pool.begin().await?;
         let id: i64 = query_scalar(
-            "INSERT INTO invitations(grant_id, secret_hash, expires_at)
-             VALUES (?, ?, ?) RETURNING id",
+            "INSERT INTO invitations(grant_id, secret_hash, expires_at, created_at)
+             VALUES (?, ?, ?, ?) RETURNING id",
         )
         .bind(grant_id)
         .bind(hash)
         .bind(expires_at)
+        .bind(now)
         .fetch_one(&mut *transaction)
         .await?;
         audit(
@@ -403,21 +413,14 @@ impl Store {
             String,
             Option<i64>,
         )> = query_as(
-            if recipient.is_some() {"SELECT g.id, g.team_id, g.stored_key_id, g.remote_signer_public_key,
+            "SELECT g.id, g.team_id, g.stored_key_id, g.remote_signer_public_key,
                     g.remote_signer_secret_envelope, g.envelope_version,
                     g.key_encryption_key_id, k.public_key, k.secret_envelope,
                     k.envelope_version, k.key_encryption_key_id, p.document, g.expires_at
              FROM grants g
              JOIN stored_keys k ON k.id = g.stored_key_id AND k.team_id = g.team_id
              JOIN policies p ON p.id = g.policy_id AND p.team_id = g.team_id AND p.deleted_at IS NULL
-             WHERE (SELECT recovery_pending FROM instance_settings WHERE singleton=1)=0 AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > unixepoch()) AND g.remote_signer_public_key = ?"} else {"SELECT g.id, g.team_id, g.stored_key_id, g.remote_signer_public_key,
-                    g.remote_signer_secret_envelope, g.envelope_version,
-                    g.key_encryption_key_id, k.public_key, k.secret_envelope,
-                    k.envelope_version, k.key_encryption_key_id, p.document, g.expires_at
-             FROM grants g
-             JOIN stored_keys k ON k.id = g.stored_key_id AND k.team_id = g.team_id
-             JOIN policies p ON p.id = g.policy_id AND p.team_id = g.team_id AND p.deleted_at IS NULL
-             WHERE (SELECT recovery_pending FROM instance_settings WHERE singleton=1)=0 AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > unixepoch()) AND ? IS NULL"},
+             WHERE (SELECT recovery_pending FROM instance_settings WHERE singleton=1)=0 AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at > unixepoch()) AND (?1 IS NULL OR g.remote_signer_public_key = ?1)"
         ).bind(recipient)
         .fetch_all(&self.pool)
         .await?;
@@ -736,6 +739,15 @@ impl Store {
         .flatten())
     }
 
+    pub async fn cached_session_response(
+        &self,
+        event_id: &str,
+    ) -> Result<Option<String>, StoreError> {
+        Ok(query_scalar("SELECT r.response_event_json FROM processed_requests r LEFT JOIN sessions s ON s.id=r.session_id AND s.grant_id=r.grant_id AND s.client_public_key=r.client_public_key WHERE r.event_id=? AND r.response_event_json IS NOT NULL AND ((r.session_id IS NULL AND r.method='connect') OR (s.id IS NOT NULL AND s.ended_at IS NULL) OR (r.method='logout' AND s.end_reason='logout' AND r.reason_code IS NULL))")
+            .bind(event_id).fetch_optional(&self.pool).await?.flatten())
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn begin_request(
         &self,
         event_id: &str,
@@ -748,8 +760,8 @@ impl Store {
     ) -> Result<bool, StoreError> {
         let result = query(
             "INSERT INTO processed_requests(
-                event_id, grant_id, session_id, client_public_key, request_id, method, status, request_event_json
-             ) VALUES (?, ?, ?, ?, ?, ?, 'processing', ?) ON CONFLICT(event_id) DO NOTHING",
+                event_id, grant_id, session_id, client_public_key, request_id, method, status, request_event_json, reserved_response_bytes
+             ) VALUES (?, ?, ?, ?, ?, ?, 'processing', ?, 270336) ON CONFLICT(event_id) DO NOTHING",
         )
         .bind(event_id)
         .bind(grant.id)
@@ -759,7 +771,11 @@ impl Store {
         .bind(method)
         .bind(request_json)
         .execute(&self.pool)
-        .await?;
+        .await.map_err(|error| {
+            if error.as_database_error().is_some_and(|e| e.message().contains("request capacity exceeded")) {
+                StoreError::Capacity
+            } else { StoreError::Database(error) }
+        })?;
         if result.rows_affected() == 1 {
             return Ok(true);
         }
@@ -788,7 +804,7 @@ impl Store {
         let mut tx = self.pool.begin().await?;
         query(
             "UPDATE processed_requests SET session_id = ?, status = ?, reason_code = ?,
-                    response_event_json = ?, completed_at = unixepoch()
+                    response_event_json = ?, reserved_response_bytes=0, completed_at = unixepoch()
              WHERE event_id = ?",
         )
         .bind(session_id)
@@ -919,7 +935,7 @@ impl Store {
     }
 
     pub async fn prune_requests(&self) -> Result<(), StoreError> {
-        query("DELETE FROM processed_requests WHERE event_id IN (SELECT event_id FROM processed_requests WHERE received_at<unixepoch()-600 OR (status='processing' AND received_at<unixepoch()-300) ORDER BY received_at LIMIT 500)").execute(&self.pool).await?;
+        query("DELETE FROM processed_requests WHERE event_id IN (SELECT event_id FROM processed_requests WHERE received_at<unixepoch()-600 OR (status='processing' AND received_at<unixepoch()-300) ORDER BY received_at LIMIT 1000)").execute(&self.pool).await?;
         Ok(())
     }
     pub async fn maintenance(&self) -> Result<(), StoreError> {
@@ -937,10 +953,10 @@ impl Store {
         Ok(query_scalar("WITH candidates AS (SELECT request_event_json,received_at,event_id,ROW_NUMBER() OVER (PARTITION BY grant_id,client_public_key ORDER BY received_at,event_id) AS client_position,ROW_NUMBER() OVER (PARTITION BY grant_id ORDER BY received_at,event_id) AS grant_position FROM processed_requests WHERE status='processing' AND request_event_json IS NOT NULL AND received_at>=unixepoch()-300) SELECT request_event_json FROM candidates WHERE client_position<=2 AND grant_position<=8 ORDER BY grant_position,received_at,event_id LIMIT 32").fetch_all(&self.pool).await?)
     }
     pub async fn outbox(&self) -> Result<Vec<(String, String)>, StoreError> {
-        Ok(query_as("WITH candidates AS (SELECT r.event_id,r.response_event_json,r.next_attempt_at,r.received_at,ROW_NUMBER() OVER (PARTITION BY r.grant_id ORDER BY r.next_attempt_at,r.received_at,r.event_id) AS position FROM processed_requests r JOIN grants g ON g.id=r.grant_id WHERE r.status IN ('approved','denied','failed') AND r.response_event_json IS NOT NULL AND r.next_attempt_at<=unixepoch() AND r.received_at>=unixepoch()-600 AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>unixepoch())) SELECT event_id,response_event_json FROM candidates WHERE position<=4 ORDER BY position,next_attempt_at,received_at,event_id LIMIT 32").fetch_all(&self.pool).await?)
+        Ok(query_as("WITH candidates AS (SELECT r.event_id,r.response_event_json,r.next_attempt_at,r.received_at,ROW_NUMBER() OVER (PARTITION BY r.grant_id ORDER BY r.next_attempt_at,r.received_at,r.event_id) AS position FROM processed_requests r JOIN grants g ON g.id=r.grant_id WHERE r.status IN ('approved','denied','failed') AND r.response_event_json IS NOT NULL AND r.next_attempt_at<=unixepoch() AND r.received_at>=unixepoch()-600 AND ((r.session_id IS NULL AND r.method='connect') OR EXISTS(SELECT 1 FROM sessions s WHERE s.id=r.session_id AND s.grant_id=r.grant_id AND s.client_public_key=r.client_public_key AND (s.ended_at IS NULL OR (r.method='logout' AND s.end_reason='logout' AND r.reason_code IS NULL)))) AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>unixepoch())) SELECT event_id,response_event_json FROM candidates WHERE position<=4 ORDER BY position,next_attempt_at,received_at,event_id LIMIT 32").fetch_all(&self.pool).await?)
     }
     pub async fn retry_cached(&self, event_id: &str) -> Result<(), StoreError> {
-        query("UPDATE processed_requests SET status='approved',next_attempt_at=0 WHERE event_id=? AND response_event_json IS NOT NULL AND status='completed'").bind(event_id).execute(&self.pool).await?;
+        query("UPDATE processed_requests SET status=CASE WHEN reason_code IS NULL THEN 'approved' ELSE 'denied' END,next_attempt_at=0 WHERE event_id=? AND response_event_json IS NOT NULL AND status='completed'").bind(event_id).execute(&self.pool).await?;
         Ok(())
     }
 
@@ -1100,6 +1116,9 @@ async fn audit(
     .bind(reason)
     .execute(&mut **transaction)
     .await?;
+    query("UPDATE instance_settings SET authority_revision=authority_revision+1 WHERE singleton=1")
+        .execute(&mut **transaction)
+        .await?;
     Ok(())
 }
 

@@ -30,8 +30,6 @@ CREATE TABLE team_members (
 
 CREATE INDEX team_members_user_public_key_idx ON team_members(user_public_key);
 
--- Exact NIP-98 write proofs are single-use. Signatures, unlike event IDs, remain distinct when a
--- legitimate client re-signs otherwise identical request metadata within the same second.
 CREATE TABLE stored_keys (
     id INTEGER PRIMARY KEY,
     team_id INTEGER NOT NULL REFERENCES teams(id) ON DELETE CASCADE,
@@ -163,7 +161,7 @@ CREATE TABLE sessions (
     ),
     UNIQUE (id, grant_id),
     FOREIGN KEY (invitation_id, grant_id)
-        REFERENCES invitations(id, grant_id) ON DELETE RESTRICT
+        REFERENCES invitations(id, grant_id) ON DELETE NO ACTION
 ) STRICT;
 
 CREATE UNIQUE INDEX sessions_one_active_client_per_grant_idx
@@ -238,6 +236,7 @@ CREATE TABLE processed_requests (
         response_event_json IS NULL OR json_valid(response_event_json)
     ),
     request_event_json TEXT,
+    reserved_response_bytes INTEGER NOT NULL DEFAULT 0 CHECK(reserved_response_bytes BETWEEN 0 AND 270336),
     publish_attempts INTEGER NOT NULL DEFAULT 0,
     next_attempt_at INTEGER NOT NULL DEFAULT 0,
     received_at INTEGER NOT NULL DEFAULT (unixepoch()),
@@ -296,8 +295,10 @@ INSERT INTO instance_settings(singleton) VALUES (1);
 
 PRAGMA user_version = 2;
 
+-- External management approvals carry a unique nonce; even rejected commands consume it.
 CREATE TABLE management_nonces (
     nonce TEXT PRIMARY KEY,
+    actor_public_key TEXT NOT NULL,
     accepted_at INTEGER NOT NULL DEFAULT (unixepoch())
 ) STRICT;
 CREATE INDEX management_nonces_age ON management_nonces(accepted_at);
@@ -312,20 +313,20 @@ CREATE TABLE request_storage_budget (
 ) STRICT;
 INSERT INTO request_storage_budget(singleton) VALUES(1);
 CREATE TRIGGER request_budget_insert AFTER INSERT ON processed_requests BEGIN
-    UPDATE request_storage_budget SET bytes=bytes+coalesce(length(new.request_event_json),0)+coalesce(length(new.response_event_json),0), records=records+1;
+    UPDATE request_storage_budget SET bytes=bytes+coalesce(length(CAST(new.request_event_json AS BLOB)),0)+coalesce(length(CAST(new.response_event_json AS BLOB)),0)+new.reserved_response_bytes, records=records+1;
 END;
-CREATE TRIGGER request_budget_update AFTER UPDATE OF request_event_json,response_event_json ON processed_requests BEGIN
-    UPDATE request_storage_budget SET bytes=bytes+coalesce(length(new.request_event_json),0)+coalesce(length(new.response_event_json),0)-coalesce(length(old.request_event_json),0)-coalesce(length(old.response_event_json),0);
+CREATE TRIGGER request_budget_update AFTER UPDATE OF request_event_json,response_event_json,reserved_response_bytes ON processed_requests BEGIN
+    UPDATE request_storage_budget SET bytes=bytes+coalesce(length(CAST(new.request_event_json AS BLOB)),0)+coalesce(length(CAST(new.response_event_json AS BLOB)),0)+new.reserved_response_bytes-coalesce(length(CAST(old.request_event_json AS BLOB)),0)-coalesce(length(CAST(old.response_event_json AS BLOB)),0)-old.reserved_response_bytes;
 END;
 CREATE TRIGGER request_budget_delete AFTER DELETE ON processed_requests BEGIN
-    UPDATE request_storage_budget SET bytes=bytes-coalesce(length(old.request_event_json),0)-coalesce(length(old.response_event_json),0),records=records-1;
+    UPDATE request_storage_budget SET bytes=bytes-coalesce(length(CAST(old.request_event_json AS BLOB)),0)-coalesce(length(CAST(old.response_event_json AS BLOB)),0)-old.reserved_response_bytes,records=records-1;
 END;
 CREATE TRIGGER audit_volume AFTER INSERT ON audit_events BEGIN
     DELETE FROM audit_events WHERE id <= new.id-100000;
 END;
 
 -- Bound administrative storage independently of request admission.
-CREATE TRIGGER users_capacity BEFORE INSERT ON users WHEN (SELECT count(*) FROM users) >= 1000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
+CREATE TRIGGER users_capacity BEFORE INSERT ON users WHEN NOT EXISTS(SELECT 1 FROM users WHERE public_key=new.public_key) AND (SELECT count(*) FROM users) >= 1000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
 CREATE TRIGGER teams_capacity BEFORE INSERT ON teams WHEN (SELECT count(*) FROM teams) >= 1000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
 CREATE TRIGGER team_members_capacity BEFORE INSERT ON team_members WHEN (SELECT count(*) FROM team_members) >= 10000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
 CREATE TRIGGER stored_keys_capacity BEFORE INSERT ON stored_keys WHEN (SELECT count(*) FROM stored_keys) >= 1000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
@@ -333,5 +334,23 @@ CREATE TRIGGER policies_capacity BEFORE INSERT ON policies WHEN (SELECT count(*)
 CREATE TRIGGER grants_capacity BEFORE INSERT ON grants WHEN (SELECT count(*) FROM grants) >= 1000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
 CREATE TRIGGER invitations_capacity BEFORE INSERT ON invitations WHEN (SELECT count(*) FROM invitations) >= 10000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
 CREATE TRIGGER sessions_capacity BEFORE INSERT ON sessions WHEN (SELECT count(*) FROM sessions) >= 10000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
-CREATE TRIGGER relays_capacity BEFORE INSERT ON relays WHEN (SELECT count(*) FROM relays) >= 20 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
+CREATE TRIGGER relays_capacity BEFORE INSERT ON relays WHEN NOT EXISTS(SELECT 1 FROM relays WHERE url=new.url) AND (SELECT count(*) FROM relays) >= 20 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
 CREATE TRIGGER management_nonces_capacity BEFORE INSERT ON management_nonces WHEN (SELECT count(*) FROM management_nonces) >= 10000 BEGIN SELECT RAISE(ABORT, 'instance capacity exceeded'); END;
+
+CREATE INDEX management_nonces_actor ON management_nonces(actor_public_key);
+CREATE TRIGGER management_nonce_actor_capacity BEFORE INSERT ON management_nonces WHEN (SELECT count(*) FROM management_nonces WHERE actor_public_key=new.actor_public_key) >= 128 BEGIN SELECT RAISE(ABORT, 'actor approval capacity exceeded'); END;
+
+-- Reserve a bounded encrypted reply before executing any request. A noisy grant/client/team
+-- cannot consume the shared inbox, and completing an admitted request needs no extra budget.
+CREATE INDEX processed_requests_client ON processed_requests(client_public_key);
+CREATE TRIGGER request_capacity BEFORE INSERT ON processed_requests
+WHEN NOT EXISTS(SELECT 1 FROM processed_requests WHERE event_id=new.event_id) BEGIN
+    SELECT CASE WHEN (SELECT records>=10000 OR bytes+coalesce(length(CAST(new.request_event_json AS BLOB)),0)+new.reserved_response_bytes>134217728 FROM request_storage_budget)
+        THEN RAISE(ABORT, 'request capacity exceeded') END;
+    SELECT CASE WHEN (SELECT count(*)>=2000 OR coalesce(sum(coalesce(length(CAST(request_event_json AS BLOB)),0)+coalesce(length(CAST(response_event_json AS BLOB)),0)+reserved_response_bytes),0)+coalesce(length(CAST(new.request_event_json AS BLOB)),0)+new.reserved_response_bytes>4194304 FROM processed_requests WHERE grant_id=new.grant_id)
+        THEN RAISE(ABORT, 'grant request capacity exceeded') END;
+    SELECT CASE WHEN (SELECT count(*)>=2500 OR coalesce(sum(coalesce(length(CAST(request_event_json AS BLOB)),0)+coalesce(length(CAST(response_event_json AS BLOB)),0)+reserved_response_bytes),0)+coalesce(length(CAST(new.request_event_json AS BLOB)),0)+new.reserved_response_bytes>8388608 FROM processed_requests WHERE client_public_key=new.client_public_key)
+        THEN RAISE(ABORT, 'client request capacity exceeded') END;
+    SELECT CASE WHEN (SELECT count(*)>=4000 OR coalesce(sum(coalesce(length(CAST(r.request_event_json AS BLOB)),0)+coalesce(length(CAST(r.response_event_json AS BLOB)),0)+r.reserved_response_bytes),0)+coalesce(length(CAST(new.request_event_json AS BLOB)),0)+new.reserved_response_bytes>16777216 FROM processed_requests r JOIN grants g ON g.id=r.grant_id WHERE g.team_id=(SELECT team_id FROM grants WHERE id=new.grant_id))
+        THEN RAISE(ABORT, 'team request capacity exceeded') END;
+END;

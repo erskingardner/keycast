@@ -8,16 +8,26 @@ const key=new Uint8Array(32).fill(11), pubkey=getPublicKey(key);
 const base='http://api:3000/api', canonical='https://keycast.test/api';
 const hash=body=>createHash('sha256').update(body).digest('hex');
 const responseKey=generateSecretKey();
+async function http(url, options = {}) {
+ const controller = new AbortController();
+ const timer = setTimeout(() => controller.abort(), 15000);
+ try {
+  const response = await fetch(url, {...options, signal: controller.signal});
+  // Include body consumption in the deadline, since headers may arrive before a stalled body.
+  return new Response(await response.arrayBuffer(), {status: response.status, headers: response.headers});
+ } finally { clearTimeout(timer); }
+}
 async function request(method,path,data,legacy=false) {
  const body=data===undefined?'':JSON.stringify(data);
- const config=await fetch(`${base}/config?pubkey=${pubkey}`).then(r=>r.json());
+ const config=await http(`${base}/config?pubkey=${pubkey}`).then(r=>r.json());
  const tags=[['u',canonical+path],['method',method]];
  const write=method!=='GET';
  if(write) tags.push(['payload',hash(body)]);
- if(write&&!legacy) tags.push(['instance',config.instance_id],['revision',String(config.authority_revision)],['nonce',randomBytes(32).toString('hex')],['response',getPublicKey(responseKey)]);
+ if(!legacy) tags.push(['instance',config.instance_id]);
+ if(write&&!legacy) tags.push(['revision',String(config.authority_revision)],['nonce',randomBytes(32).toString('hex')],['response',getPublicKey(responseKey)]);
  const content=write&&!legacy?(method==='POST'&&path.endsWith('/keys')?`Import private key named ${data.name}`:body):'';
- const event=finalizeEvent({kind:write&&!legacy?27236:27235,created_at:Math.floor(Date.now()/1000),tags,content},key);
- const response=await fetch(base+path,{method,headers:{authorization:'Nostr '+Buffer.from(JSON.stringify(event)).toString('base64'),'content-type':'application/json'},body:write&&body?body:undefined});
+ const event=finalizeEvent({kind:legacy?27235:write?27236:27237,created_at:Math.floor(Date.now()/1000),tags,content},key);
+ const response=await http(base+path,{method,headers:{authorization:'Nostr '+Buffer.from(JSON.stringify(event)).toString('base64'),'content-type':'application/json'},body:write&&body?body:undefined});
  if(write&&!legacy&&response.ok) {
   const encrypted=await response.json();assert.ok(encrypted.encrypted_response);assert.ok(!JSON.stringify(encrypted).includes('bunker://'));
   const reply=JSON.parse(nip44.decrypt(encrypted.encrypted_response,nip44.utils.getConversationKey(responseKey,encrypted.public_key)));
@@ -25,9 +35,9 @@ async function request(method,path,data,legacy=false) {
  }
  return {status:response.status,body:await response.json().catch(()=>null)};
 }
-assert.equal((await fetch('http://api:3000/health')).status,200);
-assert.equal((await fetch('http://web:5173/health')).status,200);
-assert.equal((await fetch('http://api:3000/ready')).status,200);
+assert.equal((await http('http://api:3000/health')).status,200);
+assert.equal((await http('http://web:5173/health')).status,200);
+assert.equal((await http('http://api:3000/ready')).status,200);
 assert.equal((await request('POST','/teams',{name:'Must not exist'},true)).status,401);
 const team=await request('POST','/teams',{name:'Smoke'});assert.equal(team.status,201);
 assert.equal((await request('PUT','/relays',{minimum_connected_relays:1,relays:[{url:'ws://127.0.0.1:1',enabled:true}]})).status,200);

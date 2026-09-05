@@ -27,10 +27,13 @@ async function remove() {
 }
 
 const descriptions = $derived.by(() => {
-    const capabilities = policy.document.capabilities;
+    const capabilities = policy.document?.capabilities;
+    if (!capabilities || typeof capabilities !== "object" || Array.isArray(capabilities)) {
+        return ["Unknown policy document; all requests are denied."];
+    }
     const values: string[] = [];
     if (capabilities.sign_event) {
-        values.push(`Sign event kinds: ${capabilities.sign_event.allowed_kinds.join(", ")}`);
+        values.push(`Sign event kinds: ${(capabilities.sign_event.allowed_kinds ?? []).join(", ")}`);
     }
     for (const method of [
         "nip04_encrypt",

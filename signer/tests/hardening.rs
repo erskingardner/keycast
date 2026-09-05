@@ -1,5 +1,7 @@
 use keycast_core::v2::{
-    envelope::EnvelopeCipher, management::MANAGEMENT_KIND, policy::RequestedCapabilities,
+    envelope::EnvelopeCipher,
+    management::{MANAGEMENT_KIND, MANAGEMENT_READ_KIND},
+    policy::RequestedCapabilities,
 };
 use keycast_signer::{
     protocol::{RequestProcessor, RuntimeMetrics},
@@ -56,7 +58,7 @@ impl Fixture {
             .fetch_one(&pool)
             .await
             .unwrap();
-        let policy:i64=query_scalar("INSERT INTO policies(team_id,name,document) VALUES(?,'test',?) RETURNING id").bind(team).bind(json!({"version":1,"capabilities":{"sign_event":{"allowed_kinds":[1,27235,MANAGEMENT_KIND]}}}).to_string()).fetch_one(&pool).await.unwrap();
+        let policy:i64=query_scalar("INSERT INTO policies(team_id,name,document) VALUES(?,'test',?) RETURNING id").bind(team).bind(json!({"version":1,"capabilities":{"sign_event":{"allowed_kinds":[1,27235,MANAGEMENT_KIND,MANAGEMENT_READ_KIND]}}}).to_string()).fetch_one(&pool).await.unwrap();
         let store = Store::new(pool, EnvelopeCipher::from_key(Zeroizing::new([21; 32])));
         let user = Keys::generate();
         let key = store
@@ -88,7 +90,14 @@ impl Fixture {
             remote,
             user,
             client: Keys::generate(),
-            secret: uri.split("secret=").nth(1).unwrap().into(),
+            secret: uri
+                .split("secret=")
+                .nth(1)
+                .unwrap()
+                .split('&')
+                .next()
+                .unwrap()
+                .into(),
             grant: grant.id,
             policy,
         }
@@ -234,7 +243,12 @@ async fn logout_survives_failed_publish_and_reserved_management_kind_is_denied()
     let f = Fixture::new("ws://127.0.0.1:1").await;
     let p = f.processor();
     p.prepare_response(&f.connect()).await.unwrap();
-    for (kind, allowed) in [(1, true), (27235, true), (MANAGEMENT_KIND, false)] {
+    for (kind, allowed) in [
+        (1, true),
+        (27235, true),
+        (MANAGEMENT_KIND, false),
+        (MANAGEMENT_READ_KIND, false),
+    ] {
         let template = json!({"pubkey":f.user.public_key(),"created_at":Timestamp::now(),"kind":kind,"tags":[],"content":""});
         let response = p
             .prepare_response(&f.event(
@@ -716,7 +730,14 @@ async fn runtime_isolates_noisy_grant_before_waiting_for_authority() {
         .await
         .unwrap();
     f.grant = grant.id;
-    f.secret = uri.split("secret=").nth(1).unwrap().into();
+    f.secret = uri
+        .split("secret=")
+        .nth(1)
+        .unwrap()
+        .split('&')
+        .next()
+        .unwrap()
+        .into();
     f.remote = f
         .store
         .decrypt_remote_keys(
@@ -1148,8 +1169,9 @@ async fn changing_relays_preserves_the_live_session_and_serves_on_the_new_subscr
 #[tokio::test]
 async fn oversized_crypto_response_is_durably_denied_before_relay_rejection() {
     let f = Fixture::new("ws://127.0.0.1:1").await;
-    query("UPDATE policies SET document=?")
+    query("UPDATE policies SET document=? WHERE id=?")
         .bind(json!({"version":1,"capabilities":{"nip44_encrypt":{"recipient":"any"}}}).to_string())
+        .bind(f.policy)
         .execute(&f.store.pool)
         .await
         .unwrap();
@@ -1181,4 +1203,175 @@ async fn oversized_crypto_response_is_durably_denied_before_relay_rejection() {
             .id,
         response.id
     );
+}
+
+#[tokio::test]
+async fn one_grants_storage_pressure_returns_a_retry_error_and_preserves_other_teams() {
+    let f = Fixture::new("ws://127.0.0.1:1").await;
+    let p = f.processor();
+    p.prepare_response(&f.connect()).await.unwrap();
+    let mut capacity = false;
+    for n in 0..60 {
+        let event = f.event(
+            &format!("large-{n}"),
+            "unsupported",
+            vec!["x".repeat(128000)],
+        );
+        match p.prepare_response(&event).await {
+            Err(keycast_signer::protocol::ProtocolError::Capacity(reply)) => {
+                assert!(f.decrypt(&reply)["error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("retry later"));
+                capacity = true;
+                break;
+            }
+            result => {
+                assert!(f.decrypt(&result.unwrap().unwrap())["error"].is_string());
+            }
+        }
+    }
+    assert!(capacity);
+    let resources = f.store.resources().await.unwrap();
+    assert!(resources.inbox_bytes <= 4 * 1024 * 1024);
+    assert_eq!(
+        resources.pending_inputs, 0,
+        "reserved response space must allow every admitted operation to complete"
+    );
+    let mut other = Fixture::populate(f.store.pool.clone(), "ws://127.0.0.1:1").await;
+    other.store = f.store.clone();
+    // populate selects the first active grant; select this fixture's own remote key.
+    let grant = other
+        .store
+        .active_grants()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|g| g.id == other.grant)
+        .unwrap();
+    other.remote = other.store.decrypt_remote_keys(&grant).unwrap();
+    let processor = other.processor();
+    processor.prepare_response(&other.connect()).await.unwrap();
+    assert_eq!(
+        other.decrypt(
+            &processor
+                .prepare_response(&other.event("healthy", "ping", vec![]))
+                .await
+                .unwrap()
+                .unwrap()
+        )["result"],
+        "pong"
+    );
+    query("DELETE FROM processed_requests")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(f.store.resources().await.unwrap().inbox_bytes, 0);
+}
+
+#[tokio::test]
+async fn logout_blocks_cached_signatures_and_denied_retries_keep_their_outcome() {
+    let f = Fixture::new("ws://127.0.0.1:1").await;
+    let p = f.processor();
+    p.prepare_response(&f.connect()).await.unwrap();
+    let denied = f.event("denied", "unsupported", vec![]);
+    p.prepare_response(&denied).await.unwrap();
+    f.store
+        .mark_published(&denied.id.to_hex(), true)
+        .await
+        .unwrap();
+    p.prepare_response(&denied).await.unwrap();
+    assert_eq!(
+        query_scalar::<_, String>("SELECT status FROM processed_requests WHERE event_id=?")
+            .bind(denied.id.to_hex())
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap(),
+        "denied"
+    );
+    let template = json!({"kind":1,"created_at":Timestamp::now(),"tags":[],"content":"test"});
+    let signed = f.event("signed", "sign_event", vec![template.to_string()]);
+    p.prepare_response(&signed).await.unwrap();
+    let logout = f.event("logout", "logout", vec![]);
+    p.prepare_response(&logout).await.unwrap();
+    assert!(p.prepare_response(&signed).await.is_err());
+    let outbox = f.store.outbox().await.unwrap();
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(outbox[0].0, logout.id.to_hex());
+}
+
+#[tokio::test]
+async fn invitation_lifetime_is_enforced_in_the_signer_store() {
+    let f = Fixture::new("ws://127.0.0.1:1").await;
+    let actor = f.user.public_key().to_hex();
+    let now = chrono::Utc::now().timestamp();
+    assert!(f
+        .store
+        .create_invitation(f.grant, &actor, now + 7 * 86400 + 60)
+        .await
+        .is_err());
+    assert!(f
+        .store
+        .create_invitation(f.grant, &actor, now + 7 * 86400)
+        .await
+        .is_ok());
+    let grant = f.store.active_grants().await.unwrap().pop().unwrap();
+    assert!(f
+        .store
+        .create_grant(
+            grant.team_id,
+            &actor,
+            grant.stored_key_id,
+            f.policy,
+            "excessive".into(),
+            None,
+            9999999999
+        )
+        .await
+        .is_err());
+    assert!(f
+        .store
+        .create_grant(
+            grant.team_id,
+            &actor,
+            grant.stored_key_id,
+            f.policy,
+            "short".into(),
+            Some(now + 30),
+            now + 20
+        )
+        .await
+        .is_ok());
+}
+
+#[tokio::test]
+async fn runtime_recovers_from_pool_pressure_without_restarting() {
+    let relay = LocalRelay::new();
+    relay.run().await.unwrap();
+    let pool = sqlx_sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_millis(50))
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    raw_sql(include_str!("../../database/migrations/0001_initial.sql"))
+        .execute(&pool)
+        .await
+        .unwrap();
+    let f = Fixture::populate(pool, relay.url().await.as_str()).await;
+    let state = RuntimeState::new(f.store.clone());
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(relay_supervisor(state.clone(), rx));
+    ready(&state).await;
+    let connection = f.store.pool.acquire().await.unwrap();
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(
+        !task.is_finished(),
+        "pool pressure must not terminate the supervisor"
+    );
+    drop(connection);
+    ready(&state).await;
+    stop.send(true).unwrap();
+    task.await.unwrap().unwrap();
+    relay.shutdown();
 }

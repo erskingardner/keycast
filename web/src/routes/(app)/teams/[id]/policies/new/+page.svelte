@@ -128,7 +128,7 @@ async function savePolicy() {
         {#if allowSigning}
             <div class="form-group mb-0!">
                 <label for="allowedKinds">Allowed event kinds</label>
-                <input id="allowedKinds" type="text" bind:value={allowedKinds} placeholder="1, 7, 27235" />
+                <input id="allowedKinds" type="text" bind:value={allowedKinds} placeholder="1, 7" />
             </div>
         {/if}
     </div>

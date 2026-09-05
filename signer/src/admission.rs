@@ -78,21 +78,16 @@ impl Drop for Ticket {
     fn drop(&mut self) {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         state.running.total -= 1;
-        for (map, key) in [(&mut state.running.clients, &self.client)] {
-            let count = map.get_mut(key).expect("admitted client");
+        let running = &mut state.running;
+        for (map, key) in [
+            (&mut running.clients, &self.client),
+            (&mut running.grants, &self.grant),
+        ] {
+            let count = map.get_mut(key).expect("admitted worker");
             *count -= 1;
             if *count == 0 {
                 map.remove(key);
             }
-        }
-        let count = state
-            .running
-            .grants
-            .get_mut(&self.grant)
-            .expect("admitted grant");
-        *count -= 1;
-        if *count == 0 {
-            state.running.grants.remove(&self.grant);
         }
     }
 }

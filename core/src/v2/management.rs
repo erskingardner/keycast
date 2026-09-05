@@ -3,6 +3,8 @@ use nostr::prelude::{Event, PublicKey};
 
 /// Hard denied on every delegated sign_event path, independent of policy.
 pub const MANAGEMENT_KIND: u16 = 27236;
+/// Instance-bound management reads must not be delegated through ordinary NIP-98.
+pub const MANAGEMENT_READ_KIND: u16 = 27237;
 pub const MAX_HTTP_BODY: usize = 1024 * 1024;
 pub const MAX_CONTROL_BYTES: u64 = 8 * 1024 * 1024;
 

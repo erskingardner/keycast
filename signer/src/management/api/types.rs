@@ -101,11 +101,18 @@ pub struct TeamWithRelations {
 }
 
 #[derive(Debug, Serialize)]
+pub struct InvitationStatus {
+    pub id: i64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Serialize)]
 pub struct GrantWithStatus {
     #[serde(flatten)]
     pub grant: GrantSummary,
     pub active_sessions: i64,
     pub claimable_invitations: i64,
+    pub invitations: Vec<InvitationStatus>,
 }
 
 #[derive(Debug, Serialize)]

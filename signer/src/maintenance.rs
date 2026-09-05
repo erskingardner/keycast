@@ -134,7 +134,6 @@ pub async fn command(args: &[String], root: &Path) -> Result<()> {
             if !admin {
                 return Err("actor must be a current team administrator".into());
             }
-            query("UPDATE instance_settings SET authority_revision=authority_revision+1 WHERE singleton=1").execute(&db.pool).await?;
             let mut secret = Zeroizing::new(String::new());
             std::io::stdin().take(4096).read_to_string(&mut secret)?;
             let key = store

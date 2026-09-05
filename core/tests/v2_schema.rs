@@ -311,6 +311,12 @@ async fn deleting_a_stored_key_cascades_runtime_authorization_state() {
     .await
     .expect("insert invitation");
 
+    query("UPDATE invitations SET consumed_at=unixepoch()")
+        .execute(&pool)
+        .await
+        .unwrap();
+    query("INSERT INTO sessions(grant_id,invitation_id,client_public_key) SELECT grant_id,id,? FROM invitations")
+        .bind(PUBKEY_B).execute(&pool).await.unwrap();
     query("DELETE FROM stored_keys WHERE id = ?")
         .bind(key)
         .execute(&pool)
@@ -325,6 +331,13 @@ async fn deleting_a_stored_key_cascades_runtime_authorization_state() {
         .fetch_one(&pool)
         .await
         .expect("count invitations");
+    assert_eq!(
+        query_scalar::<_, i64>("SELECT count(*) FROM sessions")
+            .fetch_one(&pool)
+            .await
+            .unwrap(),
+        0
+    );
     assert_eq!(grants, 0);
     assert_eq!(invitations, 0);
 }

@@ -96,7 +96,7 @@ async function createGrant() {
         </div>
         <div class="form-group">
             <label for="invitationHours">Invitation validity in hours</label>
-            <input id="invitationHours" type="number" min="1" max="168" bind:value={invitationHours} />
+            <input id="invitationHours" type="number" min="1" max="168" bind:value={invitationHours} required />
         </div>
         <div>
             <h2 class="page-subheader">Policy</h2>

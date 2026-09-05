@@ -88,6 +88,7 @@ pub async fn run(
     database: Database,
     cipher: keycast_core::v2::envelope::EnvelopeCipher,
     socket_path: PathBuf,
+    public_url: url::Url,
 ) -> Result<(), RuntimeError> {
     let state = RuntimeState::new(Store::new(database.pool.clone(), cipher));
     let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -96,7 +97,7 @@ pub async fn run(
     let control_path = socket_path.clone();
     let control_shutdown = shutdown_rx.clone();
     let mut control = tokio::spawn(async move {
-        serve_control_socket(control_state, control_path, control_shutdown).await
+        serve_control_socket(control_state, control_path, public_url, control_shutdown).await
     });
 
     let relay_state = state.clone();
@@ -194,7 +195,8 @@ pub async fn relay_supervisor(
     let mut notifications = client.notifications();
     let processor = RequestProcessor::new(state.store.clone(), state.metrics.clone());
     let mut workers = tokio::task::JoinSet::new();
-    let mut publishers = tokio::task::JoinSet::<(String, bool)>::new();
+    let mut worker_events = HashMap::new();
+    let mut publishers = tokio::task::JoinSet::<(String, bool, bool)>::new();
     let mut publishing = HashSet::<String>::new();
     let mut inflight = HashMap::<String, std::time::Instant>::new();
     let mut accepted = HashSet::<String>::new();
@@ -209,11 +211,13 @@ pub async fn relay_supervisor(
     let admission = Admission::default();
     let mut minimum = 1i64;
     let mut recovery_pending = false;
-    let mut delivery_ok = true;
+    let mut delivery_failure: Option<std::time::Instant> = None;
+    let mut storage_ok = true;
     let mut initialized = false;
     let result = async {
         loop {
             if *shutdown.borrow() { break; }
+            let step: Result<bool, StoreError> = async {
             tokio::select! {
                 notification = notifications.next() => {
                     let Some(notification) = notification else { return Err(StoreError::InvalidInput("relay notification worker stopped".into())); };
@@ -233,17 +237,18 @@ pub async fn relay_supervisor(
                                 let event = event.into_owned();
                                 let id = event.id.to_hex();
                                 let peer = event.pubkey.to_hex();
-                                if event.kind != Kind::NostrConnect || inflight.contains_key(&id) { continue; }
-                                let Ok(target) = recipient(&event) else { continue; };
-                                if !subscribed_keys.contains(&target) { continue; }
+                                if event.kind != Kind::NostrConnect || inflight.contains_key(&id) { return Ok(true); }
+                                let Ok(target) = recipient(&event) else { return Ok(true); };
+                                if !subscribed_keys.contains(&target) { return Ok(true); }
                                 let Some(ticket) = admission.try_admit(&peer, &target.to_hex()) else {
                                     state.metrics.ingress_rejections.fetch_add(1,Ordering::Relaxed);
-                                    continue;
+                                    return Ok(true);
                                 };
                                 inflight.insert(id.clone(),std::time::Instant::now());
                                 let processor = processor.clone();
                                 let store = state.store.clone();
-                                workers.spawn(async move {
+                                let worker_id = id.clone();
+                                let task = workers.spawn(async move {
                                     let _ticket = ticket;
                                     let result = processor.prepare_response(&event).await;
                                     if result.is_ok() {
@@ -251,24 +256,49 @@ pub async fn relay_supervisor(
                                     }
                                     (id, result)
                                 });
+                                worker_events.insert(task.id(), worker_id);
                             }
                             _ => {}
                         }
                     }
                 }
                 Some(result) = workers.join_next(), if !workers.is_empty() => {
-                    let (id,result) = result.map_err(|_| StoreError::InvalidInput("request worker panicked".into()))?;
+                    let (id,result) = match result {
+                        Ok(value) => { worker_events.retain(|_, event_id| event_id != &value.0); value },
+                        Err(error) => {
+                            if let Some(id) = worker_events.remove(&error.id()) { inflight.remove(&id); }
+                            tracing::error!("request worker panicked; durable input retained for retry");
+                            return Ok(true);
+                        }
+                    };
                     inflight.remove(&id);
                     retry.reset_immediately();
-                    if let Err(error) = result {
-                        tracing::debug!(event_id=%id, error=%error, "request rejected or pending retry");
+                    match result {
+                        Err(crate::protocol::ProtocolError::Capacity(response)) if publishers.len() < 16 => {
+                            let processor = processor.clone();
+                            let client = client.clone();
+                            publishers.spawn(async move {
+                                let published = processor.publish_response(&client, &response).await.is_ok();
+                                (id, published, false)
+                            });
+                        }
+                        Err(error) => tracing::debug!(event_id=%id, error=%error, "request rejected or pending retry"),
+                        _ => {},
                     }
                 }
                 Some(result) = publishers.join_next(), if !publishers.is_empty() => {
-                    let (id,published) = result.map_err(|_| StoreError::InvalidInput("publisher panicked".into()))?;
+                    let (id,published,durable) = match result {
+                        Ok(value) => value,
+                        Err(_) => {
+                            publishing.clear();
+                            tracing::error!("publisher panicked; durable responses retained for retry");
+                            return Ok(true);
+                        }
+                    };
                     publishing.remove(&id);
-                    delivery_ok=published;
-                    state.store.mark_published(&id,published).await?;
+                    if published { delivery_failure = None; }
+                    else { delivery_failure = Some(std::time::Instant::now()); }
+                    if durable { state.store.mark_published(&id,published).await?; }
                 }
                 _ = retry.tick() => {
                     for (id,json) in state.store.outbox().await? {
@@ -281,7 +311,7 @@ pub async fn relay_supervisor(
                                 Ok(event) => processor.publish_response(&client,&event).await.is_ok(),
                                 Err(_) => false,
                             };
-                            (id,published)
+                            (id,published,true)
                         });
                     }
                 }
@@ -357,7 +387,9 @@ pub async fn relay_supervisor(
                             let Some(ticket) = admission.try_admit(&event.pubkey.to_hex(), &target.to_hex()) else { continue; };
                             inflight.insert(id.clone(),std::time::Instant::now());
                             let processor = processor.clone();
-                            workers.spawn(async move { let _ticket=ticket; let result=processor.prepare_response(&event).await; (id,result) });
+                            let worker_id = id.clone();
+                            let task = workers.spawn(async move { let _ticket=ticket; let result=processor.prepare_response(&event).await; (id,result) });
+                            worker_events.insert(task.id(), worker_id);
                         }
                     }
                 }
@@ -369,10 +401,23 @@ pub async fn relay_supervisor(
                     state.integrity_ok.store(healthy=="ok",Ordering::Relaxed);
                     if healthy!="ok" { return Err(StoreError::InvalidInput("database integrity check failed".into())); }
                 }
-                _ = shutdown.changed() => { if *shutdown.borrow() {break;} }
+                _ = shutdown.changed() => { if *shutdown.borrow() {return Ok(false);} }
             }
+            Ok(true)
+            }.await;
+            match step {
+                Ok(false) => break,
+                Ok(true) => storage_ok = true,
+                Err(StoreError::Database(error)) if retryable_database_error(&error) => {
+                    if storage_ok { tracing::warn!("signer database temporarily unavailable; retrying"); }
+                    storage_ok = false;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                Err(error) => return Err(error),
+            }
+            let delivery_ok = delivery_is_healthy(delivery_failure, std::time::Instant::now());
             state.last_progress.store(progress_tick(),Ordering::Relaxed);
-            state.ready.store(initialized && !recovery_pending && state.integrity_ok.load(Ordering::Relaxed) && state.quarantined_grants.load(Ordering::Relaxed)==0
+            state.ready.store(initialized && storage_ok && !recovery_pending && state.integrity_ok.load(Ordering::Relaxed) && state.quarantined_grants.load(Ordering::Relaxed)==0
                 && (subscribed_keys.is_empty() || (delivery_ok && accepted.len()>=minimum.max(1) as usize)),Ordering::Relaxed);
         }
         Ok(())
@@ -386,6 +431,23 @@ pub async fn relay_supervisor(
     processor.shutdown_replication().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), client.shutdown()).await;
     result
+}
+
+fn delivery_is_healthy(failure: Option<std::time::Instant>, now: std::time::Instant) -> bool {
+    failure.is_none_or(|failed| now.duration_since(failed) >= Duration::from_secs(60))
+}
+
+// Pool pressure, busy/locked databases and a full disk are recoverable without killing
+// unrelated sessions. Corruption and programming/schema errors remain fail-stop.
+fn retryable_database_error(error: &sqlx::Error) -> bool {
+    match error {
+        sqlx::Error::PoolTimedOut | sqlx::Error::Io(_) => true,
+        sqlx::Error::Database(error) => error
+            .code()
+            .and_then(|c| c.parse::<i32>().ok())
+            .is_some_and(|code| matches!(code & 255, 5 | 6 | 13)),
+        _ => false,
+    }
 }
 
 // A rejecting or silent relay cannot provoke a tight resubscription loop.
@@ -414,26 +476,6 @@ impl SubscriptionRetry {
         self.next = now + Duration::from_secs(delay + u64::from(random[0]) % 6);
     }
 }
-#[cfg(test)]
-mod retry_tests {
-    use super::*;
-    #[test]
-    fn subscription_backoff_is_monotonic_bounded_and_resets_on_replacement() {
-        let mut retry = SubscriptionRetry::default();
-        let mut now = std::time::Instant::now();
-        assert!(!retry.due(now));
-        for expected in [10, 20, 40, 80, 160, 300, 300] {
-            retry.attempted(now);
-            let delay = retry.next.duration_since(now).as_secs();
-            assert!((expected..=expected + 5).contains(&delay));
-            assert!(!retry.due(now));
-            now = retry.next;
-            assert!(retry.due(now));
-        }
-        assert_eq!(SubscriptionRetry::default().attempts, 0);
-    }
-}
-
 #[cfg(unix)]
 async fn wait_for_shutdown_signal() {
     use tokio::signal::unix::{signal, SignalKind};
@@ -456,4 +498,37 @@ fn progress_tick() -> u64 {
         .get_or_init(std::time::Instant::now)
         .elapsed()
         .as_secs()
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    #[test]
+    fn failed_delivery_signal_expires_on_an_idle_instance() {
+        let now = std::time::Instant::now();
+        assert!(delivery_is_healthy(None, now));
+        assert!(!delivery_is_healthy(
+            Some(now),
+            now + Duration::from_secs(59)
+        ));
+        assert!(delivery_is_healthy(
+            Some(now),
+            now + Duration::from_secs(60)
+        ));
+    }
+    #[test]
+    fn subscription_backoff_is_monotonic_bounded_and_resets_on_replacement() {
+        let mut retry = SubscriptionRetry::default();
+        let mut now = std::time::Instant::now();
+        assert!(!retry.due(now));
+        for expected in [10, 20, 40, 80, 160, 300, 300] {
+            retry.attempted(now);
+            let delay = retry.next.duration_since(now).as_secs();
+            assert!((expected..=expected + 5).contains(&delay));
+            assert!(!retry.due(now));
+            now = retry.next;
+            assert!(retry.due(now));
+        }
+        assert_eq!(SubscriptionRetry::default().attempts, 0);
+    }
 }

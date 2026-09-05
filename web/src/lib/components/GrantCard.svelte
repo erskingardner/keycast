@@ -7,8 +7,10 @@ let {
     grant,
     onRevoke,
     onCreateInvitation,
+    onRevokeInvitation,
 }: {
     grant: Grant;
+    onRevokeInvitation: (grant: Grant, invitationId: number) => Promise<void>;
     onRevoke: (grant: Grant) => Promise<void> | void;
     onCreateInvitation: (grant: Grant) => Promise<void> | void;
 } = $props();
@@ -37,6 +39,12 @@ async function run(action: (grant: Grant) => Promise<void> | void) {
         <span>Expiration:</span><span>{formattedUnixDateTime(grant.expires_at)}</span>
         <span>Status:</span><span>{grant.revoked_at ? "Revoked" : "Active"}</span>
     </div>
+    {#each grant.invitations as invitation}
+        <div class="text-xs text-gray-400">
+            Invitation #{invitation.id} · expires {formattedUnixDateTime(invitation.expires_at)}
+            <button type="button" class="button button-secondary" disabled={busy} onclick={() => run(g => onRevokeInvitation(g, invitation.id))}>Revoke invitation</button>
+        </div>
+    {/each}
     {#if !grant.revoked_at}
         <button type="button" onclick={() => run(onCreateInvitation)} class="button button-secondary button-icon" disabled={busy}>
             <LinkSimple size="20" /> New one-time invitation

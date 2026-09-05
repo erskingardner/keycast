@@ -14,6 +14,7 @@ pub use routes::*;
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use nostr::prelude::*;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::env;
 use thiserror::Error;
 
@@ -22,6 +23,7 @@ use crate::management::state::KeycastState;
 /// Common HTTP authentication header names
 pub const AUTHORIZATION_HEADER: &str = "Authorization";
 const AUTH_EVENT_MAX_AGE_SECONDS: i64 = 60;
+const APPROVAL_MAX_AGE_SECONDS: i64 = 300;
 const AUTH_EVENT_MAX_FUTURE_SKEW_SECONDS: i64 = 60;
 const MAX_AUTH_BODY_BYTES: usize = 1024 * 1024;
 
@@ -83,7 +85,7 @@ pub async fn auth_middleware(
     };
 
     // Validate the token
-    let event = match validate_token(auth_str, &request, &body_bytes) {
+    let event = match validate_token(auth_str, &request, &body_bytes, &state.public_url) {
         Ok(event) => event,
         Err(e) => {
             tracing::debug!("Token validation failed: {}", e);
@@ -101,6 +103,17 @@ pub async fn auth_middleware(
         axum::http::Method::GET | axum::http::Method::HEAD
     );
     if !write {
+        let instance: Result<String, _> = sqlx::query_scalar::query_scalar(
+            "SELECT instance_id FROM instance_settings WHERE singleton=1",
+        )
+        .fetch_one(&state.db)
+        .await;
+        let Ok(instance) = instance else {
+            return response_with_status(StatusCode::SERVICE_UNAVAILABLE, "Authority unavailable");
+        };
+        if keycast_core::v2::management::exact_tag(&event, "instance") != Some(instance.as_str()) {
+            return response_with_status(StatusCode::UNAUTHORIZED, "Invalid instance");
+        }
         request.extensions_mut().insert(event);
         return next.run(request).await;
     }
@@ -139,11 +152,17 @@ pub async fn auth_middleware(
     let nonce = keycast_core::v2::management::exact_tag(&event, "nonce").unwrap();
     let claim = async {
         let mut tx = state.db.begin().await?;
-        sqlx::query::query("DELETE FROM management_nonces WHERE accepted_at < unixepoch()-600").execute(&mut *tx).await?;
-        sqlx::query::query("INSERT INTO management_nonces(nonce) VALUES (?)").bind(nonce).execute(&mut *tx).await?;
-        sqlx::query::query("UPDATE instance_settings SET authority_revision=authority_revision+1 WHERE singleton=1").execute(&mut *tx).await?;
+        sqlx::query::query("DELETE FROM management_nonces WHERE accepted_at < unixepoch()-600")
+            .execute(&mut *tx)
+            .await?;
+        sqlx::query::query("INSERT INTO management_nonces(nonce,actor_public_key) VALUES (?,?)")
+            .bind(nonce)
+            .bind(event.pubkey.to_hex())
+            .execute(&mut *tx)
+            .await?;
         tx.commit().await
-    }.await;
+    }
+    .await;
     if claim.is_err() {
         return response_with_status(
             StatusCode::CONFLICT,
@@ -212,6 +231,7 @@ fn validate_token(
     token: &str,
     request: &Request<Body>,
     body: &Bytes,
+    public_url: &str,
 ) -> Result<Event, AuthenticationError> {
     // Check prefix
     if !token.starts_with("Nostr ") {
@@ -222,7 +242,7 @@ fn validate_token(
 
     let event = extract_auth_event_from_header(token)?;
 
-    validate_auth_event(&event, request, body)?;
+    validate_auth_event(&event, request, body, public_url)?;
     tracing::debug!("Token validation successful");
     Ok(event)
 }
@@ -268,6 +288,7 @@ pub fn validate_auth_event(
     event: &Event,
     request: &Request<Body>,
     body: &[u8],
+    public_url: &str,
 ) -> Result<(), AuthenticationError> {
     if event.verify().is_err() {
         tracing::debug!("Token validation failed: Event verification failed");
@@ -283,18 +304,25 @@ pub fn validate_auth_event(
     let expected = if write {
         keycast_core::v2::management::MANAGEMENT_KIND
     } else {
-        Kind::HttpAuth.as_u16()
+        keycast_core::v2::management::MANAGEMENT_READ_KIND
     };
     if event.kind.as_u16() != expected {
         tracing::debug!("Token validation failed: Invalid event kind");
         return Err(AuthenticationError::InvalidEvent(
-            "Event kind is not HttpAuth".to_string(),
+            "Invalid management event kind".to_string(),
         ));
     }
 
     let now = chrono::Utc::now().timestamp();
     let created_at = event.created_at.as_secs() as i64;
-    if created_at < now - AUTH_EVENT_MAX_AGE_SECONDS {
+    if created_at
+        < now
+            - if write {
+                APPROVAL_MAX_AGE_SECONDS
+            } else {
+                AUTH_EVENT_MAX_AGE_SECONDS
+            }
+    {
         tracing::debug!("Token validation failed: Event too old");
         return Err(AuthenticationError::InvalidEvent(
             "Event too old".to_string(),
@@ -309,7 +337,7 @@ pub fn validate_auth_event(
     }
 
     let u_tag = required_tag_content(event, "u")?;
-    let full_url = full_request_url(request);
+    let full_url = full_request_url(request, public_url);
 
     if u_tag != full_url {
         tracing::debug!("Token validation failed: Invalid u tag");
@@ -331,23 +359,8 @@ pub fn validate_auth_event(
     Ok(())
 }
 
-fn full_request_url(request: &Request<Body>) -> String {
-    if let Ok(base_url) = env::var("KEYCAST_PUBLIC_URL") {
-        return format!("{}{}", base_url.trim_end_matches('/'), request.uri());
-    }
-
-    let host = request
-        .headers()
-        .get("host")
-        .and_then(|h| h.to_str().ok())
-        .unwrap_or("localhost");
-
-    let scheme = "http";
-
-    // The API router is nested under /api, so nested route handlers see stripped paths.
-    let prefix = "/api";
-
-    format!("{}://{}{}{}", scheme, host, prefix, request.uri())
+fn full_request_url(request: &Request<Body>, public_url: &str) -> String {
+    format!("{}{}", public_url.trim_end_matches('/'), request.uri())
 }
 
 fn required_tag_content<'a>(event: &'a Event, name: &str) -> Result<&'a str, AuthenticationError> {
@@ -390,13 +403,20 @@ fn tag_contents<'a>(event: &'a Event, kind: &str) -> Vec<&'a str> {
         .collect()
 }
 
+fn hex_digest(body: &[u8]) -> String {
+    Sha256::digest(body)
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
+}
+
 fn validate_payload_tag(event: &Event, body: &[u8]) -> Result<(), AuthenticationError> {
     let payload_tag = optional_tag_content(event, "payload")?;
     if body.is_empty() && payload_tag.is_none() {
         return Ok(());
     }
 
-    let expected = sha256::digest(body);
+    let expected = hex_digest(body);
     match payload_tag {
         Some(payload) if payload.eq_ignore_ascii_case(&expected) => Ok(()),
         Some(_) => Err(AuthenticationError::InvalidEvent(
@@ -463,7 +483,6 @@ mod tests {
             .method(method)
             .uri(uri)
             .header("host", "example.com")
-            .header("x-forwarded-proto", "https")
             .body(Body::empty())
             .unwrap()
     }
@@ -476,7 +495,7 @@ mod tests {
             {
                 Kind::Custom(keycast_core::v2::management::MANAGEMENT_KIND)
             } else {
-                Kind::HttpAuth
+                Kind::Custom(keycast_core::v2::management::MANAGEMENT_READ_KIND)
             },
             "",
         )
@@ -495,6 +514,7 @@ mod tests {
 
     fn state(pool: SqlitePool) -> crate::management::state::KeycastState {
         crate::management::state::KeycastState {
+            public_url: "http://example.com/api".into(),
             db: pool.clone(),
             signer: crate::management::state::SignerClient {
                 runtime: crate::runtime::RuntimeState::new(crate::store::Store::new(
@@ -535,10 +555,11 @@ mod tests {
     fn auth_header(keys: &Keys, method: &str, url: &str, body: &[u8]) -> String {
         let mut tags = standard_tags(method, url);
         if !body.is_empty() {
-            tags.push(Tag::parse(["payload", &sha256::digest(body)]).unwrap());
+            tags.push(Tag::parse(["payload", &hex_digest(body)]).unwrap());
         }
         let kind = if method == "GET" {
-            Kind::HttpAuth
+            tags.push(Tag::parse(["instance", "test-instance"]).unwrap());
+            Kind::Custom(keycast_core::v2::management::MANAGEMENT_READ_KIND)
         } else {
             tags.extend([
                 Tag::parse(["instance", "test-instance"]).unwrap(),
@@ -593,7 +614,7 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
         let event = auth_event(standard_tags("GET", "http://example.com/api/teams"), now);
 
-        assert!(validate_auth_event(&event, &req, &[]).is_ok());
+        assert!(validate_auth_event(&event, &req, &[], "http://example.com/api").is_ok());
     }
 
     #[test]
@@ -604,13 +625,13 @@ mod tests {
         let now = chrono::Utc::now().timestamp();
 
         let missing_url = auth_event(vec![Tag::parse(["method", "GET"]).unwrap()], now);
-        assert!(validate_auth_event(&missing_url, &req, &[]).is_err());
+        assert!(validate_auth_event(&missing_url, &req, &[], "http://example.com/api").is_err());
 
         let missing_method = auth_event(
             vec![Tag::parse(["u", "http://example.com/api/teams"]).unwrap()],
             now,
         );
-        assert!(validate_auth_event(&missing_method, &req, &[]).is_err());
+        assert!(validate_auth_event(&missing_method, &req, &[], "http://example.com/api").is_err());
     }
 
     #[test]
@@ -621,7 +642,7 @@ mod tests {
         let future = chrono::Utc::now().timestamp() + AUTH_EVENT_MAX_FUTURE_SKEW_SECONDS + 60;
         let event = auth_event(standard_tags("GET", "http://example.com/api/teams"), future);
 
-        assert!(validate_auth_event(&event, &req, &[]).is_err());
+        assert!(validate_auth_event(&event, &req, &[], "http://example.com/api").is_err());
     }
 
     #[test]
@@ -631,11 +652,11 @@ mod tests {
         let req = request(Method::POST, "/teams");
         let body = br#"{"name":"ops"}"#;
         let mut tags = standard_tags("POST", "http://example.com/api/teams");
-        let digest = sha256::digest(body);
+        let digest = hex_digest(body);
         tags.push(Tag::parse(["payload", &digest]).unwrap());
         let event = auth_event(tags, chrono::Utc::now().timestamp());
 
-        assert!(validate_auth_event(&event, &req, body).is_ok());
+        assert!(validate_auth_event(&event, &req, body, "http://example.com/api").is_ok());
     }
 
     #[test]
@@ -648,12 +669,16 @@ mod tests {
 
         let missing_payload =
             auth_event(standard_tags("POST", "http://example.com/api/teams"), now);
-        assert!(validate_auth_event(&missing_payload, &req, body).is_err());
+        assert!(
+            validate_auth_event(&missing_payload, &req, body, "http://example.com/api").is_err()
+        );
 
         let mut tags = standard_tags("POST", "http://example.com/api/teams");
         tags.push(Tag::parse(["payload", "not-a-real-hash"]).unwrap());
         let mismatched_payload = auth_event(tags, now);
-        assert!(validate_auth_event(&mismatched_payload, &req, body).is_err());
+        assert!(
+            validate_auth_event(&mismatched_payload, &req, body, "http://example.com/api").is_err()
+        );
     }
 
     #[test]
@@ -679,7 +704,10 @@ mod tests {
             .body(Body::empty())
             .unwrap();
 
-        assert_eq!(full_request_url(&req), "https://keycast.example/api/teams");
+        assert_eq!(
+            full_request_url(&req, "https://keycast.example/api/"),
+            "https://keycast.example/api/teams"
+        );
         env::remove_var("KEYCAST_PUBLIC_URL");
     }
 
@@ -772,7 +800,6 @@ mod tests {
                     .method(Method::POST)
                     .uri("/teams")
                     .header("host", "example.com")
-                    .header("x-forwarded-proto", "https")
                     .header("content-type", "application/json")
                     .header(AUTHORIZATION_HEADER, &header)
                     .body(Body::from(&body[..]))
@@ -819,7 +846,6 @@ mod tests {
                     .method(Method::POST)
                     .uri("/teams")
                     .header("host", "example.com")
-                    .header("x-forwarded-proto", "https")
                     .header("content-type", "application/json")
                     .header(
                         AUTHORIZATION_HEADER,
@@ -908,7 +934,7 @@ mod tests {
             .tags([
                 Tag::parse(["u", "http://example.com/api/teams"]).unwrap(),
                 Tag::parse(["method", "POST"]).unwrap(),
-                Tag::parse(["payload", &sha256::digest(body)]).unwrap(),
+                Tag::parse(["payload", &hex_digest(body)]).unwrap(),
             ])
             .finalize(&keys)
             .unwrap();

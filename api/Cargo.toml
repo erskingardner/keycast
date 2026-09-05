@@ -8,15 +8,8 @@ edition = "2021"
 [dependencies]
 axum = "0.8.9"
 tower = { version = "0.5.3", features = ["util", "limit"] }
-base64 = { workspace = true }
-chrono = { workspace = true }
 keycast_core = { path = "../core" }
-nostr = { workspace = true }
-serde = { workspace = true }
 serde_json = { workspace = true }
-sha256 = "1.6.0"
-sqlx = { workspace = true }
-sqlx-sqlite = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tower-http = { version = "0.7.1", features = ["trace", "util", "cors"] }

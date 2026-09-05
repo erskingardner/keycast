@@ -39,32 +39,57 @@ $effect(() => {
 
 async function removeKey() {
     if (!user?.pubkey || !confirm("Remove this key and revoke every grant and session attached to it?")) return;
+    try {
     const endpoint = `/teams/${id}/keys/${pubkey}`;
     const authorization = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
     await api.delete(endpoint, { headers: { Authorization: authorization } });
     toast.success("Key removed");
     await goto(`/teams/${id}`);
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
 }
 
 async function revokeGrant(grant: Grant) {
     if (!user?.pubkey || !confirm("Revoke this grant and all of its active sessions?")) return;
+    try {
     const endpoint = `/teams/${id}/keys/${pubkey}/grants/${grant.id}`;
     const authorization = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
     await api.delete(endpoint, { headers: { Authorization: authorization } });
-    grants = grants.map((item) => item.id === grant.id ? { ...item, revoked_at: Math.floor(Date.now() / 1000), active_sessions: 0, claimable_invitations: 0 } : item);
+    grants = grants.map((item) => item.id === grant.id ? { ...item, revoked_at: Math.floor(Date.now() / 1000), active_sessions: 0, claimable_invitations: 0, invitations: [] } : item);
     toast.success("Grant revoked");
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
 }
 
 async function createInvitation(grant: Grant) {
     if (!user?.pubkey) return;
+    try {
     const endpoint = `/teams/${id}/grants/${grant.id}/invitations`;
-    const request = { expires_at: Math.floor(Date.now() / 1000) + 24 * 3600 };
+    const request = { expires_at: Math.min(Math.floor(Date.now() / 1000) + 24 * 3600, grant.expires_at ?? Infinity) };
     const body = JSON.stringify(request);
     const authorization = await api.buildAuthHeader(endpoint, "POST", user.pubkey, body);
     const response = await api.post<InvitationCreationResponse>(endpoint, request, { headers: { Authorization: authorization } });
     invitationUri = response.bunker_uri;
-    grants = grants.map((item) => item.id === grant.id ? { ...item, claimable_invitations: item.claimable_invitations + 1 } : item);
+    grants = grants.map((item) => item.id === grant.id ? { ...item, claimable_invitations: item.claimable_invitations + 1, invitations: [...item.invitations, {id: response.invitation_id, expires_at: request.expires_at}] } : item);
     toast.success("One-time invitation created");
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
+}
+async function revokeInvitation(grant: Grant, invitationId: number) {
+    if (!user?.pubkey) return;
+    try {
+        const endpoint = `/teams/${id}/invitations/${invitationId}`;
+        const authorization = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+        await api.delete(endpoint, {headers: {Authorization: authorization}});
+        grants = grants.map(item => item.id === grant.id ? {...item, claimable_invitations: Math.max(0, item.claimable_invitations - 1), invitations: item.invitations.filter(i => i.id !== invitationId)} : item);
+        invitationUri = null;
+        toast.success("Invitation revoked; active sessions are unchanged");
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
 }
 </script>
 
@@ -101,7 +126,7 @@ async function createInvitation(grant: Grant) {
             {:else}
                 <div class="card-grid w-full">
                     {#each grants as grant}
-                        <GrantCard {grant} onRevoke={revokeGrant} onCreateInvitation={createInvitation} />
+                        <GrantCard {grant} onRevoke={revokeGrant} onCreateInvitation={createInvitation} onRevokeInvitation={revokeInvitation} />
                     {/each}
                 </div>
             {/if}

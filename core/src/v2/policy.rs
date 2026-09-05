@@ -102,6 +102,7 @@ impl PolicyDocument {
 
     pub fn allows_sign_event(&self, kind: u16, requested: &RequestedCapabilities) -> bool {
         kind != super::management::MANAGEMENT_KIND
+            && kind != super::management::MANAGEMENT_READ_KIND
             && self
                 .capabilities
                 .sign_event

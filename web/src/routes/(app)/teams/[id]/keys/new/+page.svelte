@@ -57,7 +57,7 @@ async function createKey() {
     </div>
     <div class="form-group">
         <label for="secretKey">Private key (nsec or hex)</label>
-        <input type="password" autocomplete="off" spellcheck="false" placeholder="nsec1..." bind:value={secretKey} />
+        <input type="password" id="secretKey" autocomplete="off" spellcheck="false" placeholder="nsec1..." bind:value={secretKey} />
         <p class="text-sm text-gray-400">Browser import trusts this page with your private key. For stronger protection, import with the local Keycast CLI on your server.</p>
     </div>
 

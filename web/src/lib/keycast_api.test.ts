@@ -66,12 +66,13 @@ describe("management HTTP encryption and external approvals", () => {
         header = await api.buildAuthHeader("/teams/1", "DELETE", pubkey);
         expect(await api.delete("/teams/1", {headers: {Authorization:header}})).toBeNull();
     });
-    test("reads use NIP-98 without management tags or a pending key", async () => {
-        globalThis.fetch = mock(async () => Response.json({ ok: true })) as unknown as typeof fetch;
+    test("reads use an instance-bound nondelegatable kind without a pending key", async () => {
+        globalThis.fetch = mock(async (url: string | URL | Request) => String(url).includes("/config?") ? configuration() : Response.json({ ok: true })) as unknown as typeof fetch;
         const api = new KeycastApi();
         const header = await api.buildAuthHeader("/teams", "GET", pubkey);
         const event = eventFrom(header);
-        expect(event.kind).toBe(27235);
+        expect(event.kind).toBe(27237);
+        expect(event.tags).toContainEqual(["instance", "test-instance"]);
         expect(event.tags.some((t:string[])=>t[0]==="response")).toBe(false);
         expect(await api.get<{ok:boolean}>("/teams", {headers:{Authorization:header}})).toEqual({ok:true});
     });

@@ -431,3 +431,76 @@ async fn policy_removal_retains_history_but_cannot_reactivate_or_reuse_authority
     assert_eq!(team["policies"][0]["id"], 2);
     env::remove_var("ALLOWED_PUBKEYS");
 }
+
+#[tokio::test]
+async fn rejected_commands_cannot_invalidate_another_actors_approval_or_fill_the_nonce_pool() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let pool = setup_route_test_db().await;
+    let admin = Keys::generate();
+    let outsider = Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS",format!("{},{}",admin.public_key(),outsider.public_key()));
+    let app = routes::routes(state(pool.clone()));
+    let approved = signed_request(&admin,"POST","/teams",r#"{"name":"Approved"}"#,0);
+    for _ in 0..128 {
+        assert_eq!(route_request(&app,&pool,&outsider,"DELETE","/teams/999999","").await.status,403);
+    }
+    assert_eq!(route_request(&app,&pool,&outsider,"DELETE","/teams/999999","").await.status,409);
+    assert_eq!(query_scalar::<_,i64>("SELECT authority_revision FROM instance_settings").fetch_one(&pool).await.unwrap(),0);
+    assert_eq!(decrypt_reply(app.oneshot(approved).await.unwrap(),&admin).await.status,201);
+    assert_eq!(query_scalar::<_,i64>("SELECT authority_revision FROM instance_settings").fetch_one(&pool).await.unwrap(),1);
+    env::remove_var("ALLOWED_PUBKEYS");
+}
+
+#[tokio::test]
+async fn management_reads_reject_delegated_http_auth_wrong_instances_and_nonoperator_status() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let pool = setup_route_test_db().await;
+    let keys = Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS",keys.public_key().to_hex());
+    env::set_var("KEYCAST_OPERATOR_PUBKEYS",keys.public_key().to_hex().to_uppercase());
+    let app = routes::routes(state(pool.clone()));
+    for (kind,instance,expected) in [(27235,"test-instance",401),(27237,"another-instance",401),(27237,"test-instance",200)] {
+        let event=EventBuilder::new(Kind::Custom(kind),"").tags([
+            Tag::parse(["u","http://example.com/api/status"]).unwrap(),
+            Tag::parse(["method","GET"]).unwrap(),
+            Tag::parse(["instance",instance]).unwrap(),
+        ]).finalize(&keys).unwrap();
+        let request=Request::builder().uri("/status").header("host","attacker.example")
+            .header(AUTHORIZATION_HEADER,format!("Nostr {}",BASE64.encode(event.as_json()))).body(Body::empty()).unwrap();
+        assert_eq!(app.clone().oneshot(request).await.unwrap().status().as_u16(),expected);
+    }
+    env::remove_var("KEYCAST_OPERATOR_PUBKEYS");
+    assert_eq!(route_request(&app,&pool,&keys,"GET","/status","").await.status,403);
+    env::remove_var("ALLOWED_PUBKEYS");
+}
+
+#[tokio::test]
+async fn relay_replacement_at_capacity_preserves_disabled_rows_and_existing_checkpoints() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let pool=setup_route_test_db().await;
+    let keys=Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS",keys.public_key().to_hex());
+    env::set_var("KEYCAST_OPERATOR_PUBKEYS",keys.public_key().to_hex());
+    let app=routes::routes(state(pool.clone()));
+    let relays:Vec<_>=(0..20).map(|n|serde_json::json!({"url":format!("wss://relay{n}.example"),"enabled":n!=19})).collect();
+    let request=serde_json::json!({"minimum_connected_relays":1,"relays":relays}).to_string();
+    assert_eq!(route_request(&app,&pool,&keys,"PUT","/relays",&request).await.status,200);
+    query("INSERT INTO relay_checkpoints(relay_id,last_connected_at) SELECT id,123 FROM relays").execute(&pool).await.unwrap();
+    assert_eq!(route_request(&app,&pool,&keys,"PUT","/relays",&request).await.status,200);
+    assert_eq!(query_scalar::<_,i64>("SELECT count(*) FROM relay_checkpoints WHERE last_connected_at=123").fetch_one(&pool).await.unwrap(),20);
+    assert_eq!(query_scalar::<_,i64>("SELECT count(*) FROM relays WHERE enabled=0").fetch_one(&pool).await.unwrap(),1);
+    let request=serde_json::json!({"minimum_connected_relays":1,"relays":[{"url":"wss://replacement.example","enabled":true}]}).to_string();
+    assert_eq!(route_request(&app,&pool,&keys,"PUT","/relays",&request).await.status,200);
+    assert_eq!(query_scalar::<_,i64>("SELECT count(*) FROM relays").fetch_one(&pool).await.unwrap(),1);
+    env::remove_var("ALLOWED_PUBKEYS");env::remove_var("KEYCAST_OPERATOR_PUBKEYS");
+}
+
+#[test]
+fn external_approval_has_a_bounded_human_review_window() {
+    let req=request(Method::POST,"/teams");
+    let now=chrono::Utc::now().timestamp();
+    for (age,accepted) in [(70,true),(240,true),(301,false)] {
+        let event=auth_event(standard_tags("POST","http://example.com/api/teams"),now-age);
+        assert_eq!(validate_auth_event(&event,&req,&[],"http://example.com/api").is_ok(),accepted);
+    }
+}

@@ -67,6 +67,7 @@ export type Grant = {
     updated_at: number;
     active_sessions: number;
     claimable_invitations: number;
+    invitations: { id: number; expires_at: number }[];
 };
 
 export type KeyWithRelations = {
@@ -76,7 +77,7 @@ export type KeyWithRelations = {
 };
 
 export type GrantCreationResponse = {
-    grant: Omit<Grant, "active_sessions" | "claimable_invitations">;
+    grant: Omit<Grant, "active_sessions" | "claimable_invitations" | "invitations">;
     bunker_uri: string;
 };
 
@@ -97,6 +98,7 @@ export type SignerStatus = {
     active_grants: number;
     active_sessions: number;
     claimable_invitations: number;
+    invitations: { id: number; expires_at: number }[];
     enabled_relays: number;
     connected_relays: number;
     last_processed_at: number | null;

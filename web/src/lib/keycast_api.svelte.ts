@@ -1,13 +1,12 @@
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { v2 as nip44 } from "nostr-tools/nip44";
 import { sha256Hex } from "./utils/http_auth";
-import { MANAGEMENT_KIND, managementDescription } from "./utils/management";
+import { MANAGEMENT_KIND, MANAGEMENT_READ_KIND, managementDescription } from "./utils/management";
 import type { EventTemplate, NostrEvent } from "applesauce-core/helpers";
 import { getContext, setContext } from "svelte";
 import { signNostrEvent } from "./nostr";
 import {
     buildNip98Tags,
-    NIP_98_HTTP_AUTH_KIND,
     normalizeApiBaseUrl,
     type HttpAuthMethod,
 } from "./utils/http_auth";
@@ -128,7 +127,7 @@ export class KeycastApi {
         const tags = await buildNip98Tags(this.baseUrl, url, method, body);
         return {
             content: "",
-            kind: NIP_98_HTTP_AUTH_KIND,
+            kind: MANAGEMENT_READ_KIND,
             created_at: Math.floor(Date.now() / 1000),
             tags,
         };
@@ -143,17 +142,19 @@ export class KeycastApi {
         const write = method !== "GET";
         const unsignedAuthEvent = await this.buildUnsignedAuthEvent(url, method, body);
         let responseSecret: Uint8Array | undefined;
+        const config = await this.get<{ instance_id: string; authority_revision: number }>("/config", { params: { pubkey } });
+        if (!config.instance_id || !Number.isSafeInteger(config.authority_revision)) throw new Error("Signer management configuration is unavailable");
+        unsignedAuthEvent.tags.push(["instance", config.instance_id]);
         if (write) {
-            const config = await this.get<{ instance_id: string; authority_revision: number }>("/config", { params: { pubkey } });
-            if (!config.instance_id || !Number.isSafeInteger(config.authority_revision)) throw new Error("Signer management configuration is unavailable");
             responseSecret = generateSecretKey();
             const nonce = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2,"0")).join("");
             unsignedAuthEvent.kind = MANAGEMENT_KIND;
             unsignedAuthEvent.content = managementDescription(method, url, body ?? "");
             unsignedAuthEvent.tags = unsignedAuthEvent.tags.filter(t => t[0] !== "payload");
-            unsignedAuthEvent.tags.push(["payload", await sha256Hex(body ?? "")], ["instance", config.instance_id], ["revision", String(config.authority_revision)], ["nonce", nonce], ["response", getPublicKey(responseSecret)]);
+            unsignedAuthEvent.tags.push(["payload", await sha256Hex(body ?? "")], ["revision", String(config.authority_revision)], ["nonce", nonce], ["response", getPublicKey(responseSecret)]);
         }
         try {
+            unsignedAuthEvent.created_at = Math.floor(Date.now() / 1000);
             const signedAuthEvent = await signNostrEvent(unsignedAuthEvent, pubkey);
             const header = `Nostr ${base64Json(signedAuthEvent)}`;
             for (const [key,value] of this.pending) {

@@ -4,6 +4,7 @@ use sqlx_sqlite::SqlitePool;
 
 #[derive(Clone)]
 pub struct KeycastState {
+    pub public_url: String,
     pub db: SqlitePool,
     pub signer: SignerClient,
 }

@@ -166,11 +166,12 @@ pub async fn remove_user(
     let user_public_key = PublicKey::from_hex(&user_public_key)
         .map_err(|_| ApiError::bad_request("invalid user public key"))?
         .to_hex();
+    let mut transaction = state.db.begin_with("BEGIN IMMEDIATE").await?;
     let role: Option<String> =
         query_scalar("SELECT role FROM team_members WHERE team_id = ? AND user_public_key = ?")
             .bind(id)
             .bind(&user_public_key)
-            .fetch_optional(&state.db)
+            .fetch_optional(&mut *transaction)
             .await?;
     let Some(role) = role else {
         return Err(ApiError::NotFound);
@@ -179,13 +180,12 @@ pub async fn remove_user(
         let admin_count: i64 =
             query_scalar("SELECT count(*) FROM team_members WHERE team_id = ? AND role = 'admin'")
                 .bind(id)
-                .fetch_one(&state.db)
+                .fetch_one(&mut *transaction)
                 .await?;
         if admin_count <= 1 {
             return Err(ApiError::bad_request("a team must retain an admin"));
         }
     }
-    let mut transaction = state.db.begin().await?;
     query("DELETE FROM team_members WHERE team_id = ? AND user_public_key = ?")
         .bind(id)
         .bind(user_public_key)
@@ -297,9 +297,18 @@ pub async fn get_key(
     .bind(stored_key.id)
     .fetch_all(&state.db)
     .await?;
-    let grants = rows
-        .into_iter()
-        .map(|row| GrantWithStatus {
+    let rows_invitations: Vec<(i64,i64,i64)> = query_as("SELECT i.grant_id,i.id,i.expires_at FROM invitations i JOIN grants g ON g.id=i.grant_id WHERE g.stored_key_id=? AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>unixepoch()) AND i.consumed_at IS NULL AND i.revoked_at IS NULL AND i.expires_at>unixepoch() ORDER BY i.id")
+        .bind(stored_key.id).fetch_all(&state.db).await?;
+    let mut invitations_by_grant = std::collections::HashMap::<_, Vec<_>>::new();
+    for (grant_id, id, expires_at) in rows_invitations {
+        invitations_by_grant
+            .entry(grant_id)
+            .or_default()
+            .push(crate::management::api::types::InvitationStatus { id, expires_at });
+    }
+    let mut grants = Vec::new();
+    for row in rows {
+        grants.push(GrantWithStatus {
             grant: keycast_core::v2::control::GrantSummary {
                 id: row.0,
                 team_id: row.1,
@@ -314,8 +323,9 @@ pub async fn get_key(
             },
             active_sessions: row.10,
             claimable_invitations: row.11,
-        })
-        .collect();
+            invitations: invitations_by_grant.remove(&row.0).unwrap_or_default(),
+        });
+    }
     Ok(Json(KeyWithRelations {
         team: team(&state.db, id).await?,
         stored_key,
@@ -396,18 +406,18 @@ pub async fn remove_policy(
 ) -> ApiResult<StatusCode> {
     let actor = event.pubkey.to_hex();
     require_admin(&state.db, id, &actor).await?;
+    let mut transaction = state.db.begin_with("BEGIN IMMEDIATE").await?;
     let in_use: i64 =
         query_scalar("SELECT count(*) FROM grants WHERE policy_id = ? AND team_id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at>unixepoch())")
             .bind(policy_id)
             .bind(id)
-            .fetch_one(&state.db)
+            .fetch_one(&mut *transaction)
             .await?;
     if in_use > 0 {
         return Err(ApiError::bad_request(
             "revoke active grants using this policy before deleting it",
         ));
     }
-    let mut transaction = state.db.begin().await?;
     let result = query("UPDATE policies SET deleted_at=unixepoch(),updated_at=unixepoch() WHERE id = ? AND team_id = ? AND deleted_at IS NULL")
         .bind(policy_id)
         .bind(id)
@@ -580,8 +590,9 @@ pub async fn list_audit(
 
 pub async fn status(
     State(state): State<KeycastState>,
-    _auth: AuthEvent,
+    AuthEvent(event): AuthEvent,
 ) -> ApiResult<Json<StatusResponse>> {
+    require_operator(&event.pubkey.to_hex())?;
     let database_ok = state
         .signer
         .runtime
@@ -685,7 +696,10 @@ pub async fn update_relays(
     }
 
     let mut transaction = state.db.begin().await?;
-    query("UPDATE relays SET enabled = 0, updated_at = unixepoch()")
+    let urls = serde_json::to_string(&normalized.iter().map(|(url, _)| url).collect::<Vec<_>>())
+        .map_err(|_| ApiError::Internal)?;
+    query("DELETE FROM relays WHERE url NOT IN (SELECT value FROM json_each(?))")
+        .bind(urls)
         .execute(&mut *transaction)
         .await?;
     for (index, (url, enabled)) in normalized.into_iter().enumerate() {
@@ -707,10 +721,10 @@ pub async fn update_relays(
     .bind(request.minimum_connected_relays)
     .execute(&mut *transaction)
     .await?;
-    sqlx::query::query("DELETE FROM relays WHERE enabled=0")
+    query("INSERT INTO audit_events(actor_public_key,action,outcome) VALUES (?,'relays.update','succeeded')").bind(event.pubkey.to_hex()).execute(&mut *transaction).await?;
+    query("UPDATE instance_settings SET authority_revision=authority_revision+1 WHERE singleton=1")
         .execute(&mut *transaction)
         .await?;
-    query("INSERT INTO audit_events(actor_public_key,action,outcome) VALUES (?,'relays.update','succeeded')").bind(event.pubkey.to_hex()).execute(&mut *transaction).await?;
     transaction.commit().await?;
     state.signer.request(&LifecycleRequest::Reload).await?;
 
@@ -994,6 +1008,9 @@ async fn audit_control(
     .bind(outcome)
     .execute(&mut **transaction)
     .await?;
+    query("UPDATE instance_settings SET authority_revision=authority_revision+1 WHERE singleton=1")
+        .execute(&mut **transaction)
+        .await?;
     Ok(())
 }
 
@@ -1002,7 +1019,7 @@ pub fn is_operator(actor: &str) -> bool {
         .unwrap_or_default()
         .split(',')
         .map(str::trim)
-        .any(|p| p == actor)
+        .any(|p| p.eq_ignore_ascii_case(actor))
 }
 pub fn require_operator(actor: &str) -> ApiResult<()> {
     if is_operator(actor) {

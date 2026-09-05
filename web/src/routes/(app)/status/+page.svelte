@@ -12,16 +12,18 @@ const user = $derived(getCurrentUser()?.user);
 let status: StatusResponse | null = $state(null);
 let isLoading = $state(true);
 let isSaving = $state(false);
+let loadError = $state<string | null>(null);
 let minimumConnectedRelays = $state(1);
 let relayLines = $state("");
 
 $effect(() => {
-    if (user?.pubkey && !status && isLoading) void refresh();
+    if (user?.pubkey) void refresh();
 });
 
 async function refresh() {
     if (!user?.pubkey) return;
     isLoading = true;
+    loadError = null;
     try {
         const authorization = await api.buildAuthHeader("/status", "GET", user.pubkey);
         status = await api.get<StatusResponse>("/status", {
@@ -33,7 +35,8 @@ async function refresh() {
             .map((relay) => relay.url)
             .join("\n");
     } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Could not load status");
+        loadError = error instanceof Error ? error.message : "Could not load status";
+        toast.error(loadError);
     } finally {
         isLoading = false;
     }
@@ -57,7 +60,6 @@ async function saveRelays() {
         );
         await api.put("/relays", body, { headers: { Authorization: authorization } });
         toast.success("Relay configuration saved");
-        status = null;
         await refresh();
     } catch (error) {
         toast.error(error instanceof Error ? error.message : "Could not save relays");
@@ -80,6 +82,8 @@ function relayHealthy(relay: RelayStatus): boolean {
         <ArrowClockwise size="20" /> Refresh
     </button>
 </div>
+
+{#if loadError}<p class="input-error">{loadError}. Instance status requires an operator.</p>{/if}
 
 {#if isLoading && !status}
     <Loader />

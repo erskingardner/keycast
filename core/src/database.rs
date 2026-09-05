@@ -1,5 +1,5 @@
+use std::os::unix::fs::DirBuilderExt;
 use std::path::{Path, PathBuf};
-use std::str::FromStr;
 use std::time::Duration;
 
 use sqlx::migrate::Migrator;
@@ -14,8 +14,6 @@ pub enum DatabaseError {
     Sqlx(#[from] sqlx::Error),
     #[error("database migration error: {0}")]
     Migration(#[from] sqlx::migrate::MigrateError),
-    #[error("invalid database path")]
-    InvalidPath,
 }
 
 #[derive(Clone)]
@@ -26,18 +24,21 @@ pub struct Database {
 impl Database {
     pub async fn new(db_path: PathBuf, migrations_path: PathBuf) -> Result<Self, DatabaseError> {
         if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
+            std::fs::DirBuilder::new()
+                .recursive(true)
+                .mode(0o700)
+                .create(parent)?;
         }
 
-        let options =
-            SqliteConnectOptions::from_str(db_path.to_str().ok_or(DatabaseError::InvalidPath)?)?
-                .create_if_missing(true)
-                .foreign_keys(true)
-                .journal_mode(sqlx_sqlite::SqliteJournalMode::Wal)
-                .synchronous(sqlx_sqlite::SqliteSynchronous::Full)
-                .pragma("max_page_count", "65536")
-                .pragma("journal_size_limit", "16777216")
-                .busy_timeout(Duration::from_secs(10));
+        let options = SqliteConnectOptions::new()
+            .filename(&db_path)
+            .create_if_missing(true)
+            .foreign_keys(true)
+            .journal_mode(sqlx_sqlite::SqliteJournalMode::Wal)
+            .synchronous(sqlx_sqlite::SqliteSynchronous::Full)
+            .pragma("max_page_count", "65536")
+            .pragma("journal_size_limit", "16777216")
+            .busy_timeout(Duration::from_secs(10));
 
         let pool = SqlitePoolOptions::new()
             .acquire_timeout(Duration::from_secs(10))
