@@ -1,108 +1,104 @@
 x-keycast-hardening: &keycast-hardening
-  user: "${KEYCAST_UID:-10001}:${KEYCAST_GID:-10001}"
+  user: "10001:10001"
   read_only: true
   tmpfs:
     - /tmp:size=64m,mode=1777
+  init: true
+  pids_limit: 128
+  mem_limit: 512m
+  stop_grace_period: 30s
   security_opt:
     - no-new-privileges:true
   cap_drop:
     - ALL
+  ulimits:
+    core: 0
+    nofile:
+      soft: 4096
+      hard: 4096
+  restart: unless-stopped
+  networks:
+    - keycast
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "3"
+      compress: "true"
 
 services:
+  keycast-signer:
+    <<: *keycast-hardening
+    container_name: keycast-signer
+    image: "${KEYCAST_SIGNER_IMAGE:-ghcr.io/marmot-protocol/keycast-signer}@${KEYCAST_SIGNER_DIGEST:?set reviewed signer image digest}"
+    volumes:
+      - ./database:/app/database:rw
+      - keycast-runtime:/run/keycast:rw
+      - ./master.key:/run/secrets/keycast-root-key:ro
+    environment:
+      RUST_LOG: info,keycast_signer=info
+      ALLOWED_PUBKEYS: "${ALLOWED_PUBKEYS:?error}"
+      KEYCAST_OPERATOR_PUBKEYS: "${KEYCAST_OPERATOR_PUBKEYS:?set instance operator pubkeys}"
+      KEYCAST_PUBLIC_URL: "https://${DOMAIN:?error}/api"
+    healthcheck:
+      test: ["CMD", "/app/keycast_signer", "healthcheck"]
+      interval: 10s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
+
   keycast-api:
     <<: *keycast-hardening
     container_name: keycast-api
-    image: ${KEYCAST_IMAGE:-ghcr.io/marmot-protocol/keycast}:${KEYCAST_IMAGE_TAG:-master}
-    command: api
+    image: "${KEYCAST_API_IMAGE:-ghcr.io/marmot-protocol/keycast-api}@${KEYCAST_API_DIGEST:?set reviewed api image digest}"
     expose:
       - "3000"
+    depends_on:
+      keycast-signer:
+        condition: service_started
     volumes:
-      - ./database:/app/database:rw
-      - ./master.key:/app/master.key:ro
+      - keycast-runtime:/run/keycast:ro
     environment:
-      - "ALLOWED_PUBKEYS=${ALLOWED_PUBKEYS:?error}"
+      KEYCAST_ALLOWED_ORIGINS: "https://${DOMAIN:?error}"
+      RUST_LOG: info,keycast_api=info
     healthcheck:
-      test: ["CMD", "/usr/local/bin/healthcheck.sh", "api"]
+      test: ["CMD", "/app/keycast_api", "healthcheck"]
       interval: 10s
-      timeout: 5s
+      timeout: 6s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
-    networks:
-      - keycast
     labels:
       - "caddy=${DOMAIN:?error}"
       - "caddy.reverse_proxy=/api/* {{upstreams 3000}}"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        compress: "true"
 
   keycast-web:
     <<: *keycast-hardening
     container_name: keycast-web
-    image: ${KEYCAST_IMAGE:-ghcr.io/marmot-protocol/keycast}:${KEYCAST_IMAGE_TAG:-master}
-    command: web
+    image: "${KEYCAST_WEB_IMAGE:-ghcr.io/marmot-protocol/keycast-web}@${KEYCAST_WEB_DIGEST:?set reviewed web image digest}"
     expose:
       - "5173"
     depends_on:
       keycast-api:
         condition: service_healthy
     environment:
-      - NODE_ENV=production
-      - WAIT_FOR_API=true
-      - HOST=0.0.0.0
-      - PORT=5173
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 5173
+      ORIGIN: "https://${DOMAIN:?error}"
     healthcheck:
-      test: ["CMD", "/usr/local/bin/healthcheck.sh", "web"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
       interval: 10s
-      timeout: 5s
+      timeout: 6s
       retries: 3
       start_period: 10s
-    restart: unless-stopped
-    networks:
-      - keycast
     labels:
       - "caddy=${DOMAIN:?error}"
       - "caddy.reverse_proxy=/* {{upstreams 5173}}"
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        compress: "true"
-
-  keycast-signer:
-    <<: *keycast-hardening
-    container_name: keycast-signer
-    image: ${KEYCAST_IMAGE:-ghcr.io/marmot-protocol/keycast}:${KEYCAST_IMAGE_TAG:-master}
-    command: signer
-    volumes:
-      - ./database:/app/database:rw
-      - ./signer/config.toml:/app/signer/config.toml:ro
-      - ./master.key:/app/master.key:ro
-    environment:
-      - RUST_LOG=info,keycast_signer=info
-      - MASTER_KEY_PATH=/app/master.key
-    healthcheck:
-      test: ["CMD", "/usr/local/bin/healthcheck.sh", "signer"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-    restart: unless-stopped
-    networks:
-      - keycast
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
-        compress: "true"
 
 networks:
   keycast:
     external: true
     name: keycast
+
+volumes:
+  keycast-runtime:

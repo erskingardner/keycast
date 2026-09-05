@@ -1,14 +1,14 @@
 #!/bin/bash
 set -e
+umask 077
+set -o noclobber
 
 KEY_FILE="master.key"
 
-# Check if key already exists and --force not specified
-if [ -f "$KEY_FILE" ] && [ "$1" != "--force" ]; then
-    echo "Error: $KEY_FILE already exists. Use --force to overwrite."
+# Never offer an overwrite shortcut: replacing this file makes every stored key undecryptable.
+if [ -f "$KEY_FILE" ]; then
+    echo "Error: $KEY_FILE already exists; refusing to overwrite it."
     exit 1
-elif [ -f "$KEY_FILE" ] && [ "$1" == "--force" ]; then
-    echo "Warning: Overwriting existing master key!"
 fi
 
 # Generate a 32-byte (256-bit) random key using openssl and base64 encode it

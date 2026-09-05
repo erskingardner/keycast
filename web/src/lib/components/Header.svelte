@@ -22,6 +22,7 @@ const activePage = $derived($page.url.pathname);
     <nav class="flex flex-row items-center justify-start gap-4">
         {#if user}
             <a class="nav-link {activePage === '/teams' ? 'active' : ''} bordered" href="/teams">Teams</a>
+            <a class="nav-link {activePage === '/status' ? 'active' : ''} bordered" href="/status">Status</a>
             <button
                 onclick={() => signout()}
                 ontouchend={() => signout()}

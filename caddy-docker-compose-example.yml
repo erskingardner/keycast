@@ -1,6 +1,6 @@
 services:
   caddy:
-    image: lucaslorentz/caddy-docker-proxy:2.10-alpine@sha256:bf987a8729e1e71ce0696be799b9a1a392d413923c8462d63856c73d702c1a94
+    image: lucaslorentz/caddy-docker-proxy:2.13.1-alpine@sha256:3e6cf4a6382da0cd14108a69929d7f8cc59e9a59cae4c9795071fa392ffa8036
     ports:
       - 80:80
       - 443:443

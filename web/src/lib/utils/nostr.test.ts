@@ -63,6 +63,7 @@ describe("Nostr helper utilities", () => {
         expect(buildNip46SigningPermissions()).toEqual([
             "get_public_key",
             "sign_event:27235",
+            "sign_event:27236",
         ]);
     });
 
@@ -74,7 +75,7 @@ describe("Nostr helper utilities", () => {
 
         expect(uri.protocol).toBe("nostrconnect:");
         expect(uri.searchParams.get("perms")).toBe(
-            "get_public_key,sign_event:27235",
+            "get_public_key,sign_event:27235,sign_event:27236",
         );
     });
 

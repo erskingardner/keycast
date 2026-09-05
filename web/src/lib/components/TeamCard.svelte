@@ -1,6 +1,6 @@
 <script lang="ts">
 import type { TeamWithRelations } from "$lib/types";
-import { formattedDate } from "$lib/utils/dates";
+import { dateFromUnixSeconds, formattedDate } from "$lib/utils/dates";
 
 let { team }: { team: TeamWithRelations } = $props();
 </script>
@@ -15,6 +15,6 @@ let { team }: { team: TeamWithRelations } = $props();
           {team.team_users?.length} {`${team.team_users?.length === 1 ? "member" : "members"}`}
       </span>
   </div>
-  <span class="text-xs text-gray-500">Created: {formattedDate(new Date(team.team.created_at))}</span>
+  <span class="text-xs text-gray-500">Created: {formattedDate(dateFromUnixSeconds(team.team.created_at))}</span>
   
 </a>

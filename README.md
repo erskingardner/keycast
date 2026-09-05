@@ -1,250 +1,151 @@
 # Keycast
 
-Secure remote signing and team-managed permissions for Nostr keys.
+Keycast is a small, self-hosted NIP-46 remote signer for personal, family, and small-team Nostr
+keys. Version 2 is intentionally a clean break from the original implementation: it uses a new
+schema, a single multiplexed signer, one-time invitations, explicit sessions, and strict
+default-deny policies.
 
-Keycast is an early-stage project. A May 2026 audit found and fixed several auth, permission, data
-integrity, and dependency issues, but this should still get a deployment review before it is trusted
-with real team keys on the public internet. See [AUDIT.md](AUDIT.md) for the current status.
+Keycast is security-sensitive software. The repository has test-backed hardening, but it has not
+received an independent security audit. Read [AUDIT.md](AUDIT.md) before trusting it with valuable
+keys.
 
-## What It Does
+## Architecture
 
-Keycast lets a team:
+Three processes run on one VM:
 
-- sign in with a Nostr key and manage team membership,
-- store Nostr private keys encrypted at rest in SQLite,
-- create policies and permissions for stored keys,
-- generate NIP-46 bunker connection strings,
-- run signer processes that approve or deny remote signing requests from those policies.
+- `keycast-web` serves the SvelteKit UI.
+- `keycast-api` forwards signed management requests. It has neither a database nor a root credential.
+- `keycast-signer` owns SQLite, verifies original approvals and team/operator authorization, evaluates
+  policy, performs NIP-46 operations over shared relays, and writes redacted audit records.
 
-The project was written for teams rather than individual remote-signing workflows like `nsec.app`,
-Knox, or Amber.
+The API connects to a private Unix socket through a read-only mount. The web process has neither
+socket nor database access. Management writes require an external signer even when the same Nostr
+identity is managed by Keycast. All grants hard-deny the private management event kind 27236.
 
-## Project Layout
+See [docs/V2_ARCHITECTURE.md](docs/V2_ARCHITECTURE.md) for the design and its boundaries.
 
-- `core/` - shared Rust models, database helpers, encryption, and permission checks.
-- `api/` - Axum API, SQLite setup, NIP-98 HTTP auth middleware, and team/key/policy routes.
-- `signer/` - signer manager plus one `signer_daemon` process per authorization.
-- `web/` - SvelteKit app that asks a NIP-07 signer to sign NIP-98 auth events.
-- `database/migrations/` - SQLite schema.
-- `scripts/` - key generation, Docker entrypoint, health checks, and deployment init.
+## Clean V2 Boundary
 
-## Current Validation State
+V2 creates `database/keycast-v2.db` from `database/migrations/0001_initial.sql`. It does not read or
+migrate `database/keycast.db`. Old stored-key ciphertext, authorizations, redemption records,
+invitations, shared secrets, and bunker URLs are invalid in v2. Re-import keys and issue new grants.
 
-These commands were run after the May 14, 2026 hardening pass:
-
-- `cargo check --workspace` passes with no warnings.
-- `cargo build --workspace` passes.
-- `cargo test --workspace` passes.
-- `cd web && bun test` passes.
-- `cd web && bun run check` passes with no warnings.
-- `cd web && bun run build` passes with no warnings.
-- `bun audit` and `cd web && bun audit` report no vulnerabilities.
-- `bun pm scan` and `cd web && bun pm scan` run through the configured Socket scanner and report no
-  advisories in free mode.
-- `cargo audit` exits quietly. `.cargo/audit.toml` documents the ignored upstream `instant` advisory,
-  which is pulled into the lockfile by `nostr` for wasm targets and is not used by the native runtime.
-- `bash -n` passes for `scripts/init.sh`, `scripts/upgrade_preflight.sh`,
-  `scripts/docker-entrypoint.sh`, `scripts/healthcheck.sh`, and `scripts/generate_key.sh`.
-- Migration `0002_normalize_allowed_kinds_permissions.sql` was smoke-tested against a migrated
-  SQLite database and converts the legacy `{"sign":[...]}` permission shape to
-  `{"allowed_kinds":[...]}`.
-- Docker Compose config rendering passes with explicit `ALLOWED_PUBKEYS`, `KEYCAST_UID`, and
-  `KEYCAST_GID` values.
-- `DOCKER_BUILDKIT=1 docker build -t keycast-runtime-check .` passes with digest-pinned base images,
-  frozen lockfiles, and production frontend dependencies.
-- The built API image starts under `--read-only`, creates a fresh SQLite database on a writable bind
-  mount, and applies migrations 1 and 2.
-- The built web image starts as UID/GID `10001`, serves `/health` under `--read-only` plus `/tmp`
-  tmpfs, and emits the expected CSP, HSTS, frame, referrer, permissions, and content-type headers.
-
-## Setup
+## Production Setup
 
 Requirements:
 
-- Rust toolchain
-- Bun
-- SQLx CLI for database reset commands
-- `cargo-watch` for the combined dev command
-- `openssl` or `/dev/urandom` for `master.key` generation
+- a Linux VM with current Docker Engine and the Compose plugin;
+- DNS for the chosen hostname;
+- an external Docker network named `keycast`;
+- a reverse proxy attached to that network. `caddy-docker-compose-example.yml` is provided.
 
-Install dependencies:
-
-```sh
-bun install
-cd web && bun install
-```
-
-Generate the local encryption key:
+Initialize a checkout:
 
 ```sh
-bun run key:generate
+bash scripts/init.sh \
+  --domain keycast.example.com \
+  --allowed-pubkeys "64-character-hex-pubkey[,another-pubkey]"
+# Set the three reviewed image digests in .env before production preflight/pull.
+sudo scripts/upgrade_preflight.sh --fix-permissions
+sudo docker compose -f docker-compose.prod.yml pull
+sudo docker compose -f docker-compose.prod.yml up -d
 ```
 
-This creates `master.key` at the repo root. It is ignored by git and must never be committed. The
-current `FileKeyManager` reads this root file directly.
+`ALLOWED_PUBKEYS` is the instance admission allowlist. `KEYCAST_OPERATOR_PUBKEYS` controls global relay changes. It fails closed when absent. Open registration
+exists only as an explicit development escape hatch through `KEYCAST_ALLOW_OPEN_REGISTRATION=true`;
+do not enable it on an Internet-facing instance.
 
-Create `.env` from `.env.example` for Docker/deployment settings:
+The setup creates a 32-byte root key in `master.key`, mode `0600`, and assigns the database and key
+to the fixed container UID/GID `10001`. The file is mounted read-only into the signer only. V2 can
+also load a systemd credential from `$CREDENTIALS_DIRECTORY` when run outside Compose.
 
-```sh
-cp .env.example .env
-```
+Production publishes three images:
 
-`ALLOWED_PUBKEYS` is enforced by the API for NIP-98-authenticated requests. The API also exposes an
-unauthenticated `/api/config?pubkey=<hex>` check so the browser can ask whether the current pubkey is
-allowed without receiving the full server allowlist.
+- `ghcr.io/marmot-protocol/keycast-signer:v2`
+- `ghcr.io/marmot-protocol/keycast-api:v2`
+- `ghcr.io/marmot-protocol/keycast-web:v2`
+
+Production Compose requires reviewed SHA-256 manifest digests for all three images.
+Use source Compose (`docker compose up -d --build`) for a local build.
+
+## Operations
+
+The authenticated **Status** page reports:
+
+- schema and envelope versions and the non-secret root-key fingerprint;
+- active grants, sessions, and claimable invitations;
+- enabled and connected relay counts;
+- per-relay connection, receive, publish, failure, and error checkpoints;
+- the last processed request and redacted failure counters.
+
+API health and signing readiness are separate so management remains available during relay outages.
+Readiness tracks accepted subscriptions, integrity, and quarantined grants. A runtime progress
+watchdog exits stalled processes; Docker restarts failed services.
+
+Use the trusted CLI for private key import, online encrypted backup, restore with revoked old grants,
+and offline root rotation. See [docs/V2_OPERATIONS.md](docs/V2_OPERATIONS.md) for exact commands,
+restore review, external-signer approvals, browser-import limitations, and resource bounds.
+
+Relay configuration is instance-wide and editable on the Status page. URLs must use `wss://`
+(`ws://` is accepted only for loopback testing), duplicates are rejected, and the minimum-connected
+threshold cannot exceed the number of enabled relays.
 
 ## Development
 
-Run API, web, and signer together:
+Requirements: Rust 1.96, Bun 1.3.9, `cargo-watch`, SQLx CLI, and OpenSSL.
 
 ```sh
-bun run dev
+bun install
+cd web && bun install && cd ..
+bun run key:generate
+ALLOWED_PUBKEYS=<64-character-hex-pubkey> bun run dev
 ```
 
-The local dev scripts run the API on `http://localhost:3100` and point the web app at that origin.
-The Docker/runtime default API port remains `3000`.
-
-Run pieces separately:
+For a loopback-only disposable test, the open-registration shortcut avoids configuring an operator
+admission allowlist (global relay changes still require an explicit operator):
 
 ```sh
-bun run dev:api
-bun run dev:web
-bun run dev:signer
+bun run dev:open
 ```
 
-Reset the SQLite database:
+Open `http://localhost:5173` and sign in with a NIP-07 extension or another Nostr Connect signer.
+Never use `dev:open` on a network-accessible API. The API listens on `127.0.0.1:3100`, permits the
+local web origin, and shares `runtime/signer.sock` with the signer. The signer watcher is scoped to
+source and migration paths so socket and SQLite writes cannot restart an active NIP-46 exchange.
+Development logging keeps dependency internals at warning level while retaining Keycast and HTTP
+request diagnostics; normal idle operation should not continuously emit logs.
+Reset only the v2 development database with:
 
 ```sh
 bun run db:reset
 ```
 
-Useful validation commands:
+## Validation
 
 ```sh
-cargo check --workspace
-cargo build --workspace
-cargo test --workspace
-cd web && bun test
-cd web && bun run check
-cd web && bun run build
+cargo fmt --all --check
+cargo check --workspace --locked
+cargo build --workspace --locked
+cargo test --workspace --locked
 cargo audit
+
+bun install --frozen-lockfile
 bun audit
-cd web && bun audit
 bun pm scan
-cd web && bun pm scan
-cd web && bun pm untrusted
+
+cd web
+bun install --frozen-lockfile
+bun test
+bun run check
+bun run build
+bun audit
+bun pm scan
+bun pm untrusted
 ```
 
-## Bun Security Scanning
-
-`bun pm scan` is Bun's pluggable package scanner. Bun does not include a scanner by default; it loads
-an npm package named in `bunfig.toml`:
-
-```toml
-[install.security]
-scanner = "@socketsecurity/bun-security-scanner"
-```
-
-This repo now installs `@socketsecurity/bun-security-scanner@1.1.2` exactly in both Bun projects. It
-runs in Socket free mode without credentials. Set `SOCKET_API_KEY` only if you want scans to use a
-Socket organization policy.
-
-## Runtime Flow
-
-1. The web app signs in through a selected external signer: NIP-07 browser extension, Amber/NIP-55
-   clipboard signing on Android, or a `bunker://` NIP-46 remote signer.
-2. API calls include a NIP-98 HTTP auth event in the `Authorization` header.
-3. The API verifies the event, extracts the pubkey, and checks team membership for team reads and
-   admin rights for mutations or authorization-secret-bearing routes.
-4. Stored keys and per-authorization bunker keys are encrypted with the root `master.key`.
-5. The signer manager watches authorization rows and starts a `signer_daemon` for each one.
-6. Each signer daemon decrypts the stored key and bunker key, listens on configured relays, and calls
-   `Authorization::validate_policy` before approving NIP-46 requests.
-
-## Security Notes
-
-The current hardening posture:
-
-- NIP-98 auth now requires exactly one `u` tag and one `method` tag, rejects stale or far-future
-  timestamps, validates request-body `payload` hashes, and rejects oversized authenticated bodies.
-- `ALLOWED_PUBKEYS` is parsed exactly and enforced server-side.
-- Allowed-kinds permission config now uses one Rust/TypeScript shape and rejects unknown fields.
-- Empty policies default-deny sign/encrypt/decrypt requests, and policy creation rejects empty,
-  unknown, or malformed permission configs.
-- SQLite connections enable foreign-key enforcement, and team deletion no longer loses permission join
-  data before cleanup.
-- Server-side route protection now covers nested app routes such as `/teams/:id`, not only exact
-  top-level paths.
-- Web responses set CSP, frame, content-type, referrer, permissions, and HTTPS HSTS headers.
-
-Keep future fixes narrow and test-backed. The code handles private key material, so correctness and
-access control matter more than cosmetic cleanup.
-
-## Deployment
-
-Docker deployment uses:
-
-- `docker-compose.yml` for local source builds of API, web, and signer containers,
-- `docker-compose.prod.yml` for pulling the published `ghcr.io/marmot-protocol/keycast` image,
-- `master.key` mounted into API and signer containers,
-- an external Docker network named `keycast`,
-- Caddy labels for routing `/api/*` to the API and the rest to the web app.
-
-The compose defaults now require `ALLOWED_PUBKEYS`, expose the API only on the Docker network, build
-with frozen Bun/Cargo lockfiles, and avoid copying `master.key` into the image. Runtime containers run
-as a non-root UID/GID, use a read-only root filesystem, drop Linux capabilities, set
-`no-new-privileges`, and get a writable `/tmp` tmpfs. The Caddy example uses a read-only Docker socket
-and a digest-pinned `caddy-docker-proxy` image. `.dockerignore` excludes local build output, package
-installs, databases, `.env` files, and `master.key` from the build context.
-
-Initialize a server checkout:
-
-```sh
-bash scripts/init.sh --domain keycast.example.com --allowed-pubkeys "hexpubkey1,hexpubkey2"
-sudo docker compose -f docker-compose.prod.yml pull
-sudo docker compose -f docker-compose.prod.yml up -d
-```
-
-`scripts/init.sh` writes `KEYCAST_UID` and `KEYCAST_GID` into `.env`, defaults them to the current
-user, and tries to set matching ownership on `database/` and `master.key`. Pass `--uid` and `--gid`
-if the container user should be different.
-
-Every push to `master` publishes one reusable image to GitHub Container Registry with `master`,
-`latest`, and `sha-<commit>` tags. Set `KEYCAST_IMAGE_TAG=sha-<commit>` in `.env` when you want a
-pin-and-roll-forward deployment instead of tracking the moving `master` tag. If GitHub creates the
-first package as private, change the package visibility to public in the GitHub Packages settings.
-
-For an existing deployment, do not use the blank-install flow blindly. Read [UPGRADE.md](UPGRADE.md),
-back up `database/keycast.db` and `master.key` together, verify the host `master.key` matches the
-currently running container, set `ALLOWED_PUBKEYS`, and run:
-
-```sh
-scripts/upgrade_preflight.sh
-sudo scripts/upgrade_preflight.sh --fix-permissions
-```
-
-The new SQL migration normalizes old allowed-kinds permission JSON during API or signer startup. It
-does not rotate keys, change encrypted stored-key material, or intentionally invalidate existing
-NIP-46 bunker connection strings. Keep `database/migrations/` present on the server because the API
-and signer read migrations from the bind-mounted `database/` directory. If you roll back after the
-migration has run, restore the database backup as well as the matching `master.key`.
-
-Before using this for real keys, review the residual notes in [AUDIT.md](AUDIT.md), configure the
-proxy headers used by NIP-98 URL validation, and rerun the validation commands above.
-
-## Custom Permissions
-
-Permissions are implemented in `core/src/custom_permissions`. To add or change a permission, update
-all of these places together:
-
-- Rust permission implementation and config type in `core/src/custom_permissions/`
-- `AVAILABLE_PERMISSIONS` in `core/src/custom_permissions/mod.rs`
-- `Permission::to_custom_permission` in `core/src/types/permission.rs`
-- web permission types in `web/src/lib/types.ts`
-- web form rendering in `web/src/lib/components/PermissionForm.svelte`
-- README or audit notes if the semantics affect signing approval
-
-Do not rely on frontend-only validation for permission safety.
+The Docker workflow additionally builds all three runtime targets and runs them together with
+read-only root filesystems, dropped capabilities, a private socket volume, and signer-only root-key
+access.
 
 ## License
 

@@ -1,4 +1,4 @@
-@import 'tailwindcss';
+@import 'tailwindcss/index.css';
 
 @plugin '@tailwindcss/typography';
 @plugin '@tailwindcss/forms';
@@ -33,17 +33,17 @@
   }
 }
 
-:global(:root) {
+:root {
     color-scheme: dark;
 }
 
-:global(html) {
+html {
     background-color: var(--color-gray-900);
     color: var(--color-gray-100);
 }
 
 /* Force dark mode even if user's system is in light mode */
-:global(*) {
+* {
     /* Prevent any light mode flashing */
     transition: none !important;
 }

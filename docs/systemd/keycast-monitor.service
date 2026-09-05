@@ -1,0 +1,17 @@
+[Unit]
+Description=Keycast monitor
+# Configure an OnFailure= handler that reaches your monitoring system before enabling.
+
+[Service]
+Type=oneshot
+User=keycast
+Group=keycast
+UMask=0077
+EnvironmentFile=/etc/keycast/host-operations.env
+ExecStart=/usr/bin/python3 /opt/keycast/scripts/operations/keycast_ops.py monitor /etc/keycast/operations.json
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/srv/keycast /run/keycast
+TimeoutStartSec=1h

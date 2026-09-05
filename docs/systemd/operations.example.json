@@ -1,0 +1,11 @@
+{
+  "signer_command": ["/usr/local/bin/keycast_signer"],
+  "status_command": ["/usr/local/bin/keycast_signer"],
+  "backup_key_file": "/secure/keycast-backup.key",
+  "backup_directory": "/srv/keycast/backups",
+  "database_directory": "/srv/keycast/database",
+  "remote_directory": "CHOOSE-RCLONE-REMOTE:keycast",
+  "keep_local": 7,
+  "minimum_free_bytes": 1073741824,
+  "maximum_backup_age_seconds": 90000
+}

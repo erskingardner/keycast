@@ -18,3 +18,11 @@ export function formattedDateTime(date: Date | null) {
         minute: "numeric",
     });
 }
+
+export function dateFromUnixSeconds(value: number): Date {
+    return new Date(value * 1000);
+}
+
+export function formattedUnixDateTime(value: number | null): string {
+    return value === null ? "None" : formattedDateTime(dateFromUnixSeconds(value));
+}

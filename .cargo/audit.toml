@@ -1,5 +1,0 @@
-[advisories]
-# `instant` is pulled into Cargo.lock by nostr's wasm32 target dependency in the
-# current 0.44.x release line. Keycast builds and ships native Linux binaries,
-# and `cargo tree -i instant` is empty for the default native target.
-ignore = ["RUSTSEC-2024-0384"]

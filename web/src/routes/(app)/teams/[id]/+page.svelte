@@ -10,11 +10,13 @@ import PolicyCard from "$lib/components/PolicyCard.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
 import type {
-    PolicyWithPermissions,
+    AuditEvent,
+    Policy,
     StoredKey,
     TeamWithRelations,
     User,
 } from "$lib/types";
+import { formattedUnixDateTime } from "$lib/utils/dates";
 import { truncatedNpubForPubkey } from "$lib/utils/nostr";
 import { DotsThreeVertical } from "phosphor-svelte";
 import { toast } from "svelte-hot-french-toast";
@@ -28,12 +30,13 @@ let teamAuthHeader: string | null = $state(null);
 let team: TeamWithRelations | null = $state(null);
 let users: User[] = $state([]);
 let storedKeys: StoredKey[] = $state([]);
-let policies: PolicyWithPermissions[] = $state([]);
+let policies: Policy[] = $state([]);
+let auditEvents: AuditEvent[] = $state([]);
 let isAdmin = $derived(
     users.some(
         (team_user) =>
             team_user.user_public_key === user?.pubkey &&
-            team_user.role === "Admin",
+            team_user.role === "admin",
     ),
 );
 
@@ -46,12 +49,18 @@ $effect(() => {
                     headers: { Authorization: authHeader },
                 });
             })
-            .then((teamResponse) => {
+            .then(async (teamResponse) => {
                 team = teamResponse as TeamWithRelations;
                 users = team.team_users;
                 storedKeys = team.stored_keys;
                 policies = team.policies;
+                const auditEndpoint = `/teams/${id}/audit`;
+                const auditHeader = await api.buildAuthHeader(auditEndpoint, "GET", user.pubkey);
+                auditEvents = await api.get<AuditEvent[]>(auditEndpoint, {
+                    headers: { Authorization: auditHeader },
+                });
             })
+            .catch((error) => toast.error(error instanceof Error ? error.message : "Failed to load team"))
             .finally(() => {
                 isLoading = false;
             });
@@ -113,6 +122,19 @@ async function removeUser(userToRemove: User) {
         .catch((error) => {
             toast.error("Failed to remove user");
         });
+}
+
+async function removePolicy(policy: Policy) {
+    if (!user?.pubkey || !confirm(`Delete policy “${policy.name}”?`)) return;
+    const endpoint = `/teams/${id}/policies/${policy.id}`;
+    try {
+        const authHeader = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+        await api.delete(endpoint, { headers: { Authorization: authHeader } });
+        policies = policies.filter((item) => item.id !== policy.id);
+        toast.success("Policy deleted");
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : "Failed to delete policy");
+    }
 }
 </script>
 
@@ -208,7 +230,11 @@ async function removeUser(userToRemove: User) {
             {:else}
                 <div class="card-grid">
                     {#each policies as policy}
-                        <PolicyCard {policy} />
+                        <PolicyCard
+                            {policy}
+                            editHref={isAdmin ? `/teams/${id}/policies/new?edit=${policy.id}` : undefined}
+                            onRemove={isAdmin ? removePolicy : undefined}
+                        />
                     {/each}
                 </div>
             {/if}
@@ -216,6 +242,30 @@ async function removeUser(userToRemove: User) {
                 <a href={`/teams/${id}/policies/new`} class="button button-primary self-start">Add Policy</a>
             {/if}
         </div>
+    </PageSection>
+
+    <PageSection title="Recent audit activity">
+        {#if auditEvents.length === 0}
+            <p class="text-gray-500">No audit events yet</p>
+        {:else}
+            <div class="card overflow-x-auto">
+                <table class="w-full text-sm">
+                    <thead class="text-left text-gray-400">
+                        <tr><th class="pb-2 pr-4">Time</th><th class="pb-2 pr-4">Action</th><th class="pb-2 pr-4">Outcome</th><th class="pb-2">Actor / reason</th></tr>
+                    </thead>
+                    <tbody>
+                        {#each auditEvents as event}
+                            <tr class="border-t border-white/10">
+                                <td class="py-2 pr-4 whitespace-nowrap">{formattedUnixDateTime(event.occurred_at)}</td>
+                                <td class="py-2 pr-4 font-mono">{event.action}</td>
+                                <td class="py-2 pr-4">{event.outcome}</td>
+                                <td class="py-2 font-mono text-xs text-gray-400">{event.actor_public_key ? `${event.actor_public_key.slice(0, 12)}…` : "system"}{event.reason_code ? ` · ${event.reason_code}` : ""}</td>
+                            </tr>
+                        {/each}
+                    </tbody>
+                </table>
+            </div>
+        {/if}
     </PageSection>
 
     {#if isAdmin}

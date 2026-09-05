@@ -6,6 +6,7 @@ function applySecurityHeaders(response: Response, event: Parameters<Handle>[0]["
     if (!response.headers.has("Content-Security-Policy")) {
         response.headers.set("Content-Security-Policy", cspHeaderValue);
     }
+    response.headers.set("Cache-Control", "no-store");
     response.headers.set("X-Content-Type-Options", "nosniff");
     response.headers.set("X-Frame-Options", "DENY");
     response.headers.set("Referrer-Policy", "no-referrer");

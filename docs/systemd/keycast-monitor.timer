@@ -1,0 +1,7 @@
+[Unit]
+Description=Check Keycast signing, capacity and off-host recovery freshness
+[Timer]
+OnBootSec=2m
+OnUnitActiveSec=1m
+[Install]
+WantedBy=timers.target

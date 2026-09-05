@@ -5,29 +5,34 @@ authors = ["Keycast Authors"]
 version = "0.1.0"
 edition = "2021"
 
-# The main signer binary runs the signer manager which spawns
-# and manages the signing daemons for each authorization
+# One multiplexed signer owns all active grants and relay connections.
 [[bin]]
 name = "keycast_signer"
 path = "src/main.rs"
 
-[[bin]]
-name = "signer_daemon"
-path = "src/signer_daemon.rs"
-
 [dependencies]
-keycast_core = { path = "../core" }
+axum = "0.8.9"
+tower = { version = "0.5.3", features = ["util"] }
+sha256 = "1.6.0"
+url = "2.5.8"
+base64 = { workspace = true }
 chrono = { workspace = true }
-config = { workspace = true }
-dotenvy = { workspace = true }
-nostr-sdk = {workspace = true}
-nostr = {workspace = true}
-nostr-connect = "=0.44.0"
-once_cell = { workspace = true }
+constant_time_eq = "0.6.0"
+getrandom = "0.4.3"
+keycast_core = { path = "../core" }
+nostr = { workspace = true }
+nostr-sdk = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = "0.11.0"
 sqlx = { workspace = true }
 sqlx-sqlite = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-tracing-appender = { workspace = true }
 tracing-subscriber = { workspace = true }
+urlencoding = "2.1.3"
+zeroize = "1.9.0"
+
+[dev-dependencies]
+nostr-sdk = { workspace = true, features = ["local-relay"] }

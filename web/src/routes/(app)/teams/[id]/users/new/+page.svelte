@@ -13,7 +13,7 @@ const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 
 let pubkeyOrNpub: string = $state("");
-let role: "Admin" | "Member" = $state("Member");
+let role: "admin" | "member" = $state("member");
 let errorMessage: string | null = $state(null);
 
 async function addTeammate() {
@@ -74,8 +74,8 @@ async function addTeammate() {
     <div class="form-group">
         <label for="role">Role</label>
         <select bind:value={role}>
-            <option value="Member">Member</option>
-            <option value="Admin">Admin</option>
+            <option value="member">Member</option>
+            <option value="admin">Admin</option>
         </select>
     </div>
     <button type="submit" class="button button-primary">Add Teammate</button>

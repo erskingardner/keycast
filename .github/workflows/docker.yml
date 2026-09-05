@@ -12,116 +12,56 @@ permissions:
 
 env:
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-  TEST_IMAGE: keycast-ci-smoke:${{ github.sha }}
+  API_IMAGE: ghcr.io/${{ github.repository_owner }}/keycast-api
+  SIGNER_IMAGE: ghcr.io/${{ github.repository_owner }}/keycast-signer
+  WEB_IMAGE: ghcr.io/${{ github.repository_owner }}/keycast-web
 
 jobs:
   build:
-    name: Build and publish Keycast image
+    name: Build, smoke, and publish v2 images
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=raw,value=master,enable=${{ github.ref == 'refs/heads/master' }}
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/master' }}
-            type=sha,prefix=sha-,format=short
-
-      - name: Build image
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          platforms: linux/amd64
-          load: true
-          tags: |
-            ${{ env.TEST_IMAGE }}
-            ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Smoke test API image
+      - name: Build all runtime targets
         run: |
           set -euo pipefail
-          tmpdir="$(mktemp -d)"
-          cleanup() {
-            docker rm -f keycast-api-smoke >/dev/null 2>&1 || true
-            rm -rf "$tmpdir"
-          }
-          trap cleanup EXIT
+          docker buildx build --load --target api-runtime --tag keycast-api:ci .
+          docker buildx build --load --target signer-runtime --tag keycast-signer:ci .
+          docker buildx build --load --target web-runtime --tag keycast-web:ci .
 
-          mkdir -p "$tmpdir/database"
-          cp -R database/migrations "$tmpdir/database/migrations"
-          chmod 777 "$tmpdir/database"
-          chmod -R a+rX "$tmpdir/database/migrations"
-          openssl rand 32 | base64 > "$tmpdir/master.key"
-          chmod 644 "$tmpdir/master.key"
+      - name: Smoke test hardened process split
+        run: |
+          set -euo pipefail
+          docker tag keycast-api:ci keycast-hardening-api:local
+          docker tag keycast-signer:ci keycast-hardening-signer:local
+          docker tag keycast-web:ci keycast-hardening-web:local
+          scripts/container-smoke.sh
 
-          docker run -d \
-            --name keycast-api-smoke \
-            --read-only \
-            --tmpfs /tmp:size=64m,mode=1777 \
-            -e ALLOWED_PUBKEYS=abcdef \
-            -v "$tmpdir/database:/app/database" \
-            -v "$tmpdir/master.key:/app/master.key:ro" \
-            "${TEST_IMAGE}" api
-
-          for _ in {1..30}; do
-            if docker exec keycast-api-smoke /usr/local/bin/healthcheck.sh api; then
-              exit 0
-            fi
-            sleep 1
+      - name: Tag and publish images
+        run: |
+          set -euo pipefail
+          short_sha="${GITHUB_SHA:0:12}"
+          for component in api signer web; do
+            case "$component" in
+              api) destination="$API_IMAGE" ;;
+              signer) destination="$SIGNER_IMAGE" ;;
+              web) destination="$WEB_IMAGE" ;;
+            esac
+            for tag in v2 latest "sha-$short_sha"; do
+              docker tag "keycast-$component:ci" "$destination:$tag"
+              docker push "$destination:$tag"
+            done
           done
-
-          docker logs keycast-api-smoke
-          exit 1
-
-      - name: Smoke test web image
-        run: |
-          set -euo pipefail
-          cleanup() {
-            docker rm -f keycast-web-smoke >/dev/null 2>&1 || true
-          }
-          trap cleanup EXIT
-
-          docker run -d \
-            --name keycast-web-smoke \
-            --read-only \
-            --tmpfs /tmp:size=64m,mode=1777 \
-            -e HOST=0.0.0.0 \
-            -e PORT=5173 \
-            "${TEST_IMAGE}" web
-
-          for _ in {1..30}; do
-            if docker exec keycast-web-smoke /usr/local/bin/healthcheck.sh web; then
-              exit 0
-            fi
-            sleep 1
-          done
-
-          docker logs keycast-web-smoke
-          exit 1
-
-      - name: Push image tags
-        run: |
-          set -euo pipefail
-          while IFS= read -r tag; do
-            [ -z "$tag" ] || docker push "$tag"
-          done <<< "${{ steps.meta.outputs.tags }}"

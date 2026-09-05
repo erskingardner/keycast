@@ -1,34 +1,77 @@
-use keycast_core::encryption::KeyManager;
-use once_cell::sync::OnceCell;
-use sqlx_sqlite::SqlitePool;
-use std::sync::Arc;
+use std::path::PathBuf;
+use std::time::Duration;
+
+use keycast_core::v2::control::{ControlRequest, ControlResponse};
 use thiserror::Error;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::UnixStream;
 
-#[derive(Error, Debug)]
-pub enum StateError {
-    #[error("Database not initialized")]
-    DatabaseNotInitialized,
-    #[error("Key manager not initialized")]
-    KeyManagerNotInitialized,
-}
+const MAX_CONTROL_RESPONSE_BYTES: u64 = keycast_core::v2::management::MAX_CONTROL_BYTES;
 
+#[derive(Clone)]
 pub struct KeycastState {
-    pub db: SqlitePool,
-    pub key_manager: Box<dyn KeyManager>,
+    pub signer: SignerClient,
 }
 
-pub static KEYCAST_STATE: OnceCell<Arc<KeycastState>> = OnceCell::new();
-
-pub fn get_db_pool() -> Result<&'static SqlitePool, StateError> {
-    KEYCAST_STATE
-        .get()
-        .map(|state| &state.db)
-        .ok_or(StateError::DatabaseNotInitialized)
+#[derive(Clone)]
+pub struct SignerClient {
+    socket_path: PathBuf,
 }
 
-pub fn get_key_manager() -> Result<&'static dyn KeyManager, StateError> {
-    KEYCAST_STATE
-        .get()
-        .map(|state| state.key_manager.as_ref())
-        .ok_or(StateError::KeyManagerNotInitialized)
+#[derive(Debug, Error)]
+pub enum SignerClientError {
+    #[error("signer is unavailable")]
+    Unavailable,
+    #[error("signer returned an invalid response")]
+    InvalidResponse,
+    #[error("signer rejected the operation ({code}): {message}")]
+    Rejected { code: String, message: String },
+}
+
+impl SignerClient {
+    pub fn new(socket_path: PathBuf) -> Self {
+        Self { socket_path }
+    }
+
+    pub async fn request(
+        &self,
+        request: &ControlRequest,
+    ) -> Result<ControlResponse, SignerClientError> {
+        let operation = async {
+            let mut stream = UnixStream::connect(&self.socket_path)
+                .await
+                .map_err(|_| SignerClientError::Unavailable)?;
+            let bytes =
+                serde_json::to_vec(request).map_err(|_| SignerClientError::InvalidResponse)?;
+            stream
+                .write_all(&bytes)
+                .await
+                .map_err(|_| SignerClientError::Unavailable)?;
+            stream
+                .shutdown()
+                .await
+                .map_err(|_| SignerClientError::Unavailable)?;
+            let mut response = Vec::new();
+            (&mut stream)
+                .take(MAX_CONTROL_RESPONSE_BYTES + 1)
+                .read_to_end(&mut response)
+                .await
+                .map_err(|_| SignerClientError::Unavailable)?;
+            if response.len() as u64 > MAX_CONTROL_RESPONSE_BYTES {
+                return Err(SignerClientError::InvalidResponse);
+            }
+            let response: ControlResponse = serde_json::from_slice(&response)
+                .map_err(|_| SignerClientError::InvalidResponse)?;
+            match response {
+                ControlResponse::Error { code, message } => {
+                    Err(SignerClientError::Rejected { code, message })
+                }
+                response => Ok(response),
+            }
+        };
+
+        tokio::time::timeout(Duration::from_secs(10), operation)
+            .await
+            .map_err(|_| SignerClientError::Unavailable)?
+    }
 }

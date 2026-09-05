@@ -5,7 +5,7 @@ export default defineConfig({
     plugins: [sveltekit()],
     build: {
         target: "esnext",
-        minify: "esbuild",
+        minify: "oxc",
         rollupOptions: {
             output: {
                 sanitizeFileName: (name: string) => {
@@ -13,8 +13,5 @@ export default defineConfig({
                 },
             },
         },
-    },
-    esbuild: {
-        charset: "utf8",
     },
 });
