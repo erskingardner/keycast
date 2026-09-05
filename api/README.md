@@ -5,7 +5,7 @@ path/query, authorization header and exact body over `/run/keycast/signer.sock` 
 signer's response. It neither opens SQLite nor loads the root credential. Its socket mount is
 read-only; it cannot invoke actor-only lifecycle commands or decrypt management replies.
 
-The signer management router verifies NIP-98 reads, external kind-27236 mutation approvals, instance
+The signer management router verifies instance-bound kind-27237 reads, external kind-27236 mutation approvals, instance
 admission and all team/operator roles. `/health` measures API availability; `/ready` reports signer
 readiness. Keeping these distinct allows management during relay outages.
 

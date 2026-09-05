@@ -102,3 +102,30 @@ Not validated here: a production TLS/VM deployment, independent security review,
 uptime, actual machine power loss, an off-host destination, a rendered browser UI walkthrough, or every
 external key store's approval interface. The supplied host jobs are not installed/enabled. Those
 operator/deployment steps remain in `TODO.md`; they are not represented as passing local tests.
+
+
+## PR 24 review follow-up (2026-09-05)
+
+The review follow-up adds regression coverage for rejected-command revision/nonce isolation,
+nondelegatable instance-bound management reads, operator-only status with mixed-case keys,
+relay replacement at the 20-row limit (including disabled rows and retained checkpoints),
+control-request panic isolation, transient pool-pressure recovery, per-grant storage pressure and
+cross-team service, session-bound cached/outbox replies, server-side invitation deadlines,
+and real slow HTTP uploads that time out while management reads continue.
+
+Local results: **71 Rust tests**, **31 web tests**, and **3 operations tests** passed.
+`cargo fmt --all --check`, locked workspace check/build, `cargo clippy --workspace --all-targets
+--locked -- -D warnings`, Rust/Bun audits, Socket scans, Svelte type checks/build, and untrusted
+script reporting passed. Both source/production Compose and the Caddy example render using
+explicitly fictitious digests for the rendering check. All three Docker targets were built, and the combined read-only API/signer/web smoke passed.
+Shell fixture checks verified that RNG failure leaves no published root credential, malformed
+pubkey lists fail initialization, and only the first allowed key becomes an operator by default.
+
+The 1,000-signature local daemon run passed with three forced SIGKILL/restarts, 1,001 retained
+request records, no pending inputs/responses, and approximately 4 MiB WAL. Client round trips
+were p50 **15.8 ms**, p95 **23.2 ms**, p99 **26.7 ms** (maximum 42.6 ms), measured in the debug
+build with other local build activity. This is a local regression result, not a public-relay
+latency or unattended-production guarantee.
+
+The prerelease schema changed again; migration checksum refusal for an older disposable V2
+database is intentional. No existing local database or production deployment was modified.

@@ -20,8 +20,8 @@ its external signer. Passkeys are not part of this design.
 | Priority | Finding | Current behavior |
 |---|---|---|
 | Critical | API could manufacture grants or widen permissions through shared SQLite and actor-only socket commands | Only signer opens SQLite; socket forwards original signed HTTP requests; signer checks signatures and all team/operator rules |
-| Critical | Delegated signing of HTTP-auth events could promote the managed identity's authority | Writes require private management kind 27236, hard-denied by every NIP-46 grant even when a policy explicitly lists it |
-| High | Replay and stale approvals could apply after authority changed | Management approvals bind instance identity, global authority revision, exact method/URL/body, nonce and reply recipient; each write consumes the revision before mutation |
+| Critical | Delegated signing of HTTP-auth events could promote the managed identity's authority | Writes require private management kind 27236; reads require instance-bound kind 27237. Every NIP-46 grant hard-denies both even when a policy explicitly lists them |
+| High | Replay and stale approvals could apply after authority changed | Management approvals bind instance identity, global authority revision, exact method/URL/body, nonce and reply recipient; nonces are single-use and successful mutations advance the revision in the same transaction |
 | High | API could read an invitation bearer secret from its creation response | Write replies use NIP-44 encryption to a fresh browser public key included in the external approval |
 | High | Global relay changes lacked operator authorization | Signer checks a separate host-configured operator allowlist and parses exact URLs; malformed loopback-prefix URLs are rejected |
 | High | Browser import exposed key material to the web stack | Retained as an explicit trust choice; hardened field/cache/clearing behavior, private material omitted from approval events, trusted host CLI available |
@@ -34,7 +34,7 @@ its external signer. Passkeys are not part of this design.
 | High | No recoverable backup/rotation workflow | Online authenticated backup, fresh-directory restore with old authority revoked, review hold and transactional offline root rewrapping |
 | Medium | Expiry/last-admin/revocation races | Signer authority gate orders mutations and signing preparation; invitation expiry is rechecked inside a cancellation-safe immediate transaction |
 | Medium | Requests scanned/decrypted all grants and waited for the slowest relay | Recipient lookup uses its index; network publication is outside admission and completes on first acknowledgement |
-| Medium | Unbounded persistence and expensive health probing | Request byte/row budgets, table capacities, incremental retention, hourly integrity checks and cheap health paths |
+| Medium | Unbounded persistence and expensive health probing | Per-grant/client/team byte/row quotas, reserved response space, table capacities, incremental retention, hourly integrity checks and cheap health paths |
 | Medium | Hex root credentials failed decoding; plaintext lifetime and core dumps | Hex/base64 regression coverage, zeroizing root/decoded buffers and cipher state, container core dumps disabled |
 | Medium | Mutable production image selection and API sharing writable state | Reviewed per-image digests required; API socket mount read-only; no API database mount; memory/PID/log/privilege bounds |
 

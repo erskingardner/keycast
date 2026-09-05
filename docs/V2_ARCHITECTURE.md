@@ -33,9 +33,9 @@ to the API.
 signer and returns encrypted management replies. It has no database or root credential.
 
 `keycast-signer` owns SQLite, root credentials, authorization, NIP-46, relay supervision and audit.
-Its management router verifies NIP-98 reads. Writes require a private Keycast kind-27236 approval
+Its management router verifies instance-bound private kind-27237 reads. Writes require a private Keycast kind-27236 approval
 bound to instance, authority revision, nonce, method, canonical URL, body hash, verified command
-content and a fresh reply public key. All Keycast grants hard-deny this kind. The same Nostr identity
+content and a fresh reply public key. All Keycast grants hard-deny both private management kinds; ordinary NIP-98 remains delegatable for other services. The same Nostr identity
 can therefore be hosted and administer the server through an external key store without passkeys.
 
 Only signed HTTP forwarding and redacted status are accepted on the socket. Actor-only lifecycle
@@ -66,7 +66,7 @@ The current policy wire shape is:
   "version": 1,
   "capabilities": {
     "sign_event": {
-      "allowed_kinds": [1, 7, 27235]
+      "allowed_kinds": [1, 7]
     },
     "nip44_encrypt": {
       "recipient": "self"
@@ -77,7 +77,7 @@ The current policy wire shape is:
 
 Unknown versions, capabilities, fields, invalid kind values, duplicate kinds, and unconstrained
 capabilities are rejected. A client's requested permission list can only narrow the server policy.
-Policy changes take effect on the next request.
+Policy changes take effect on the next request. V1 content filters were deliberately dropped; V2 currently constrains event kinds and cryptographic recipients.
 
 Every non-`connect` method requires a live session. Invitation claim is one transaction: validate
 the constant-time secret comparison and grant/invitation expiry, consume the invitation, establish

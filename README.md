@@ -65,7 +65,7 @@ Production publishes three images:
 - `ghcr.io/marmot-protocol/keycast-api:v2`
 - `ghcr.io/marmot-protocol/keycast-web:v2`
 
-Production Compose requires reviewed SHA-256 manifest digests for all three images.
+Production Compose requires a SHA-256 manifest digest that has been reviewed for each of the three images.
 Use source Compose (`docker compose up -d --build`) for a local build.
 
 ## Operations

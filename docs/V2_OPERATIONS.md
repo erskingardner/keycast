@@ -3,19 +3,21 @@
 This release uses one active signer on one host. Only the signer opens SQLite and the root credential.
 The API forwards signed requests over a read-only socket mount. Keep the same Nostr identity in an
 external NIP-07/NIP-55/NIP-46 signer for management approvals; it may also be imported into Keycast.
-Keycast itself refuses to sign management kind 27236 regardless of policy. No passkeys are required.
+Keycast itself refuses to sign management kinds 27236 and 27237 regardless of policy. No passkeys are required.
 
 Management writes show the command contents to the external signer and bind method, public URL,
 body hash, instance identity, authority revision, nonce, and a fresh reply-encryption public key.
 Inspect the URL and command in the external signer. Approvals are single use; a failed or interrupted
 write may consume an approval and requires a fresh one. Concurrent management screens can receive
-409 and must request a new approval. Ordinary NIP-98 remains available for reads.
+409 and must request a new approval. Write approvals allow up to five minutes for human review; read proofs expire after one minute. Reads use instance-bound kind 27237. Ordinary NIP-98 remains delegatable for other services, but is never accepted as Keycast management authentication. Each identity may consume at most 128 approval nonces per ten minutes; rejected commands cannot consume another identity’s budget or advance the authority revision.
 
 `ALLOWED_PUBKEYS` controls instance admission. `KEYCAST_OPERATOR_PUBKEYS` independently controls global
-relay changes; initialization sets both to the supplied administrator keys. Each team still checks
+relay changes and instance status. Initialization defaults operators to the first allowed key; use `--operator-pubkeys` to specify operators separately. Each team still checks
 its own administrators. Changing relays requires external approval and operator membership.
 `KEYCAST_PUBLIC_URL` is required on the signer and must be `https://HOST/api`; loopback HTTP is allowed
 for development. The API must not have a database or root-key mount.
+
+Invitation lifetimes are capped at seven days in the signer and cannot exceed their grant. Grants may deliberately have no expiration for unattended personal use. Open invitation IDs and expiration times can be listed and revoked from the key page without ending sessions.
 
 ## Key import
 
@@ -123,12 +125,16 @@ limited to 128 events/second globally, 16/client/second and 32/grant/second. Rec
 admission limits. Fair selection interleaves grants in inbox recovery and the outbox. There are
 16 outbox publishers, up to 16 bounded background replication batches, and eight deadlined control
 connections (the public API permits 32 transport requests). Unknown clients
-cannot fill the durable inbox. The inbox is capped at 10,000 rows and 128 MiB of encrypted payloads;
-retries expire after ten minutes and new requests must be no older than five minutes. Expired inbox records are pruned in batches of 500 every five seconds. Audits retain
+cannot fill the durable inbox. The inbox is capped at 10,000 rows and 128 MiB including encrypted payloads and reserved reply space;
+retries expire after ten minutes and new requests must be no older than five minutes. Expired inbox records are pruned in batches of 1,000 every five seconds. Audits retain
 at most 100,000 rows/30 days. Ended sessions and unreferenced old invitations are pruned incrementally.
 Administrative table limits are explicit in the initial schema (including 1,000 grants/keys/policies
 and 20 relays). Responses that exceed the same 256 KiB content budget as ingress are durably denied before
-publication. Saturation fails closed. Configure reverse-proxy connection/rate limits as well.
+publication. Each grant is limited to 2,000 rows/4 MiB, each client public key to 2,500 rows/8 MiB across grants, and each team to 4,000 rows/16 MiB. An admitted input reserves 264 KiB for its encrypted reply before execution; completion releases unused space. Capacity exhaustion returns a bounded, encrypted retry error without executing or persisting the rejected operation. Those overload errors are best effort and still subject to publisher admission. Sustained traffic above these ten-minute retention budgets is throttled intentionally.
+
+Publication failures affect readiness for at most sixty seconds after the latest failed attempt. Retries continue while the response remains eligible. Transient pool pressure, SQLite busy/locked and full-disk errors are retried without restarting the signer; corruption remains fail-stop. Individual request/control/publisher task panics are isolated, while a stalled supervisor still triggers the watchdog.
+
+The API gives uploads a separate global 64-request/64 MiB budget, at most four uploads per socket peer, and a three-second body deadline. Signer calls retain their independent 32-request/ten-second bound. Proxied clients share the proxy’s socket-peer budget: forwarded IP headers are deliberately not trusted. Set per-client limits at the public proxy to control abusive peers behind it. Saturation fails closed. Configure reverse-proxy connection/rate limits as well.
 
 ## Release and local validation
 
