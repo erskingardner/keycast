@@ -59,10 +59,11 @@ describe("Nostr helper utilities", () => {
         );
     });
 
-    test("requests NIP-46 permission to sign NIP-98 HTTP auth events", () => {
+    test("requests external signer permissions for both private management kinds", () => {
         expect(buildNip46SigningPermissions()).toEqual([
             "get_public_key",
-            "sign_event:27235",
+            "sign_event:27236",
+            "sign_event:27237",
         ]);
     });
 
@@ -74,7 +75,7 @@ describe("Nostr helper utilities", () => {
 
         expect(uri.protocol).toBe("nostrconnect:");
         expect(uri.searchParams.get("perms")).toBe(
-            "get_public_key,sign_event:27235",
+            "get_public_key,sign_event:27236,sign_event:27237",
         );
     });
 

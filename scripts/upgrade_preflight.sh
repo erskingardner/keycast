@@ -1,184 +1,110 @@
-#!/bin/bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DB_PATH="$ROOT_DIR/database/keycast.db"
-MIGRATIONS_DIR="$ROOT_DIR/database/migrations"
-UPGRADE_MIGRATION="$MIGRATIONS_DIR/0002_normalize_allowed_kinds_permissions.sql"
-MASTER_KEY_PATH="$ROOT_DIR/master.key"
 FIX_PERMISSIONS=false
 
 usage() {
     echo "Usage: $0 [--fix-permissions]"
-    echo ""
-    echo "Checks a live Keycast checkout before deploying the hardened runtime."
-    echo "Use --fix-permissions to recursively chown database/ and master.key for KEYCAST_UID/GID."
+    echo "Validates a clean Keycast v2 deployment. Legacy database contents are not migrated."
 }
 
 while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --fix-permissions) FIX_PERMISSIONS=true ;;
         -h|--help) usage; exit 0 ;;
-        *) echo "Unknown parameter: $1"; usage; exit 1 ;;
+        *) echo "Unknown argument: $1"; usage; exit 1 ;;
     esac
     shift
 done
 
 env_value() {
     local key="$1"
-    if [ -f "$ROOT_DIR/.env" ]; then
-        grep -E "^${key}=" "$ROOT_DIR/.env" | tail -n 1 | cut -d= -f2- || true
+    if [[ -f "$ROOT_DIR/.env" ]]; then
+        awk -F= -v key="$key" '$1 == key {sub(/^[^=]*=/, ""); print; exit}' "$ROOT_DIR/.env"
     fi
 }
 
-KEYCAST_UID="${KEYCAST_UID:-$(env_value KEYCAST_UID)}"
-KEYCAST_GID="${KEYCAST_GID:-$(env_value KEYCAST_GID)}"
 ALLOWED_PUBKEYS="${ALLOWED_PUBKEYS:-$(env_value ALLOWED_PUBKEYS)}"
 DOMAIN="${DOMAIN:-$(env_value DOMAIN)}"
-KEYCAST_UID="${KEYCAST_UID:-10001}"
-KEYCAST_GID="${KEYCAST_GID:-10001}"
-
+KEYCAST_OPERATOR_PUBKEYS="${KEYCAST_OPERATOR_PUBKEYS:-$(env_value KEYCAST_OPERATOR_PUBKEYS)}"
+KEYCAST_UID=10001
+KEYCAST_GID=10001
 failures=0
 
-ok() {
-    echo "[ok] $1"
-}
+ok() { echo "[ok] $1"; }
+warn() { echo "[warn] $1"; }
+fail() { failures=$((failures + 1)); echo "[fail] $1"; }
 
-warn() {
-    echo "[warn] $1"
-}
-
-fail() {
-    failures=$((failures + 1))
-    echo "[fail] $1"
-}
-
-echo "Keycast upgrade preflight"
-echo "Repo: $ROOT_DIR"
-echo "Runtime uid/gid: $KEYCAST_UID:$KEYCAST_GID"
-
-if [ -n "$DOMAIN" ]; then
-    ok "DOMAIN is set"
+if [[ -n "$DOMAIN" && ! "$DOMAIN" =~ [^A-Za-z0-9.-] ]]; then
+    ok "DOMAIN is a hostname"
 else
-    fail "DOMAIN is not set in environment or .env"
+    fail "DOMAIN is missing or is not a hostname"
 fi
-
-if [ -n "$ALLOWED_PUBKEYS" ]; then
-    ok "ALLOWED_PUBKEYS is set"
-else
-    fail "ALLOWED_PUBKEYS is required by the hardened API container"
-fi
-
-if [ -f "$MASTER_KEY_PATH" ]; then
-    key_chars=$(tr -d '\r\n' < "$MASTER_KEY_PATH" | wc -c | tr -d ' ')
-    if [ "$key_chars" -ge 40 ]; then
-        ok "master.key exists and looks like a base64-encoded 256-bit key"
+for pubkey_name in ALLOWED_PUBKEYS KEYCAST_OPERATOR_PUBKEYS; do
+    if [[ "${!pubkey_name}" =~ ^[0-9a-fA-F]{64}(,[0-9a-fA-F]{64})*$ ]]; then
+        ok "$pubkey_name contains valid hex pubkeys"
     else
-        fail "master.key exists but is unexpectedly short"
+        fail "$pubkey_name must contain comma-separated 64-character hex pubkeys without whitespace or empty fields"
+    fi
+done
+
+if [[ -f "$ROOT_DIR/master.key" ]]; then
+    key_value="$(tr -d '\r\n' < "$ROOT_DIR/master.key")"
+    [[ "$key_value" =~ ^[0-9a-fA-F]{64}$ || "$key_value" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
+        && ok "master.key encodes exactly 32 bytes" \
+        || fail "master.key must contain one base64 or hex encoded 32-byte key"
+else
+    fail "master.key is missing"
+fi
+
+for directory in database; do
+    [[ -d "$ROOT_DIR/$directory" ]] && ok "$directory directory exists" || fail "$directory directory is missing"
+done
+
+if [[ "$FIX_PERMISSIONS" == true && -f "$ROOT_DIR/master.key" ]]; then
+    chmod 700 "$ROOT_DIR/database"
+    chmod 600 "$ROOT_DIR/master.key"
+    if chown -R "$KEYCAST_UID:$KEYCAST_GID" "$ROOT_DIR/database" "$ROOT_DIR/master.key" 2>/dev/null; then
+        ok "container ownership and permissions updated"
+    else
+        fail "could not chown runtime files; retry with sudo"
     fi
 else
-    fail "master.key is missing; do not generate a new one for an existing install"
-    echo "       If the old container has the key baked in, recover it first:"
-    echo "       docker cp keycast-api:/app/master.key ./master.key"
+    warn "permission repair not requested; use --fix-permissions before first container start"
 fi
 
-if command -v docker >/dev/null 2>&1 && [ -f "$MASTER_KEY_PATH" ]; then
-    for container in keycast-api keycast-signer keycast-web; do
-        if docker ps --format '{{.Names}}' | grep -Fxq "$container"; then
-            tmp_key="$(mktemp)"
-            if docker cp "$container:/app/master.key" "$tmp_key" >/dev/null 2>&1; then
-                if cmp -s "$MASTER_KEY_PATH" "$tmp_key"; then
-                    ok "host master.key matches $container:/app/master.key"
-                else
-                    fail "host master.key differs from $container:/app/master.key"
-                fi
-            fi
-            rm -f "$tmp_key"
-            break
-        fi
-    done
+if [[ -f "$ROOT_DIR/database/keycast.db" ]]; then
+    warn "database/keycast.db is legacy and will be ignored by v2"
 fi
-
-if [ -f "$DB_PATH" ]; then
-    ok "database/keycast.db exists"
+if [[ -f "$ROOT_DIR/database/keycast-v2.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
+    integrity="$(sqlite3 "$ROOT_DIR/database/keycast-v2.db" 'PRAGMA quick_check;' 2>/dev/null || true)"
+    [[ "$integrity" == "ok" ]] && ok "v2 database quick_check passed" || fail "v2 database quick_check failed"
+    schema="$(sqlite3 "$ROOT_DIR/database/keycast-v2.db" 'PRAGMA user_version;' 2>/dev/null || true)"
+    [[ "$schema" == "2" ]] && ok "v2 schema version is 2" || fail "unexpected v2 schema version: $schema"
 else
-    fail "database/keycast.db is missing"
+    warn "no v2 database yet; the signer will create it on first start"
 fi
 
-if [ -f "$UPGRADE_MIGRATION" ]; then
-    ok "database migrations include 0002 upgrade migration"
-else
-    fail "database migrations are missing 0002_normalize_allowed_kinds_permissions.sql"
+if [[ -z "$KEYCAST_OPERATOR_PUBKEYS" ]]; then
+    fail "KEYCAST_OPERATOR_PUBKEYS is required for global relay management"
+fi
+for component in API SIGNER WEB; do
+    digest_name="KEYCAST_${component}_DIGEST"
+    digest_value="${!digest_name:-$(env_value "$digest_name")}"
+    [[ "$digest_value" =~ ^sha256:[0-9a-f]{64}$ ]] || fail "$digest_name must be a reviewed sha256 image digest"
+done
+if command -v docker >/dev/null 2>&1; then
+    if KEYCAST_OPERATOR_PUBKEYS="$KEYCAST_OPERATOR_PUBKEYS" DOMAIN="$DOMAIN" ALLOWED_PUBKEYS="$ALLOWED_PUBKEYS" \
+        docker compose -f "$ROOT_DIR/docker-compose.prod.yml" config --quiet; then
+        ok "Docker Compose configuration renders"
+    else
+        fail "Docker Compose configuration does not render"
+    fi
 fi
 
-if [ "$FIX_PERMISSIONS" = true ]; then
-    if [ -d "$ROOT_DIR/database" ] && [ -f "$MASTER_KEY_PATH" ]; then
-        chmod 700 "$ROOT_DIR/database"
-        chmod 600 "$MASTER_KEY_PATH"
-        if chown -R "$KEYCAST_UID:$KEYCAST_GID" "$ROOT_DIR/database" 2>/dev/null \
-            && chown "$KEYCAST_UID:$KEYCAST_GID" "$MASTER_KEY_PATH" 2>/dev/null; then
-            ok "set runtime ownership on database/ and master.key"
-        else
-            fail "could not set runtime ownership; run with sudo or run: sudo chown -R $KEYCAST_UID:$KEYCAST_GID database master.key"
-        fi
-    else
-        fail "cannot fix permissions until database/ and master.key both exist"
-    fi
-else
-    warn "permission check is read-only; use --fix-permissions before starting non-root containers"
-fi
-
-if command -v sqlite3 >/dev/null 2>&1 && [ -f "$DB_PATH" ]; then
-    integrity="$(sqlite3 "$DB_PATH" 'PRAGMA integrity_check;' 2>/dev/null || true)"
-    if [ "$integrity" = "ok" ]; then
-        ok "SQLite integrity_check is ok"
-    else
-        fail "SQLite integrity_check failed: $integrity"
-    fi
-
-    fk_rows="$(sqlite3 "$DB_PATH" 'PRAGMA foreign_key_check;' 2>/dev/null || true)"
-    if [ -z "$fk_rows" ]; then
-        ok "SQLite foreign_key_check is clean"
-    else
-        fail "SQLite foreign_key_check reported rows:"
-        echo "$fk_rows"
-    fi
-
-    legacy_allowed_kinds="$(sqlite3 "$DB_PATH" "
-        SELECT COUNT(*)
-        FROM permissions
-        WHERE identifier = 'allowed_kinds'
-          AND json_valid(config)
-          AND json_type(config, '$.allowed_kinds') IS NULL
-          AND json_type(config, '$.sign') IN ('array', 'null');
-    " 2>/dev/null || echo "unknown")"
-    if [ "$legacy_allowed_kinds" = "0" ]; then
-        ok "no legacy allowed_kinds configs detected"
-    elif [ "$legacy_allowed_kinds" = "unknown" ]; then
-        warn "could not inspect legacy allowed_kinds configs"
-    else
-        warn "$legacy_allowed_kinds legacy allowed_kinds config(s) will be normalized by migration 0002"
-    fi
-
-    invalid_permissions="$(sqlite3 "$DB_PATH" "
-        SELECT COUNT(*)
-        FROM permissions
-        WHERE NOT json_valid(config);
-    " 2>/dev/null || echo "unknown")"
-    if [ "$invalid_permissions" = "0" ]; then
-        ok "permission configs are valid JSON"
-    elif [ "$invalid_permissions" = "unknown" ]; then
-        warn "could not inspect permission JSON validity"
-    else
-        fail "$invalid_permissions permission config row(s) contain invalid JSON"
-    fi
-else
-    warn "sqlite3 is not installed; skipping integrity, foreign-key, and permission-config checks"
-fi
-
-if [ "$failures" -gt 0 ]; then
+if [[ "$failures" -gt 0 ]]; then
     echo "Preflight failed with $failures blocking issue(s)."
     exit 1
 fi
-
 echo "Preflight passed."

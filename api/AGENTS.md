@@ -1,34 +1,12 @@
 # AGENTS.md
 
-This file inherits the root `AGENTS.md` guidance. It applies to `api/`.
+This file inherits the root guidance and applies to `api/`.
 
-## API Responsibilities
+- The API is transport only: no SQLite access, root credential, authorization decisions or actor-only lifecycle commands.
+- Forward original signed headers and exact method, path/query and body to the signer.
+- Bound admission, body length and timeouts. Return safe transport errors without request contents.
+- Preserve encrypted management replies; the API must not decrypt them.
+- `/health` is process availability; `/ready` reports signer readiness so management stays reachable during relay loss.
+- Authentication, team and operator checks live in `signer/src/management/`.
 
-- Verify NIP-98 auth for every `/api/*` route.
-- Extract the caller pubkey from the verified auth event.
-- Enforce team admin authorization for team, key, user, policy, and authorization mutations.
-- Encrypt incoming private keys before database writes.
-- Return structured `ApiError` responses instead of panics for user-controlled input.
-
-## Things To Be Careful With
-
-- NIP-98 `u`, `method`, timestamp, and `payload` checks are security boundaries.
-- If an endpoint accepts a body, the signed payload hash must match the exact bytes the handler sees.
-- Do not rely only on `VITE_ALLOWED_PUBKEYS`; browser config is public and bypassable. Server allowlist
-  enforcement belongs in API middleware.
-- Policy IDs must be scoped to the current team.
-- Avoid `unwrap` and `expect` in request paths. Malformed tags, JSON, dates, and IDs should return
-  client errors.
-- When deleting teams, keys, or policies, verify join rows and dependent rows are removed in a safe
-  order.
-
-## Validation
-
-```sh
-cd api && cargo test
-cargo test --workspace
-cargo build --workspace
-```
-
-Add focused tests for auth and authorization changes. If middleware needs to read the request body,
-prove that downstream JSON extraction still works.
+Run the workspace suite and combined container smoke for transport changes.

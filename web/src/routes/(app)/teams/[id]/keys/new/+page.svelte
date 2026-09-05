@@ -31,28 +31,20 @@ async function createKey() {
         secret_key: secretKey,
     };
 
-    api.buildAuthHeader(
-        `/teams/${id}/keys`,
-        "POST",
-        user.pubkey,
-        JSON.stringify(request),
-    ).then((authHeader) => {
-        api.post<StoredKey>(
-            `/teams/${id}/keys`,
-            request,
-            {
-                headers: { Authorization: authHeader },
-            },
-        )
-            .then((newKey) => {
-                toast.success("Key created successfully");
-                goto(`/teams/${id}`);
-            })
-            .catch((error) => {
-                toast.error("Failed to create key");
-                keyError = error.message;
-            });
-    });
+    secretKey = "";
+    try {
+        const authHeader = await api.buildAuthHeader(`/teams/${id}/keys`, "POST", user.pubkey, JSON.stringify(request));
+        await api.post<StoredKey>(`/teams/${id}/keys`, request, { headers: { Authorization: authHeader } });
+        toast.success("Key created successfully");
+        await goto(`/teams/${id}`);
+    } catch (error) {
+        keyError = error instanceof Error ? error.message : "Key import failed";
+        toast.error("Failed to create key");
+    } finally {
+        request.secret_key = "";
+        secretKey = "";
+    }
+
 }
 </script>
 
@@ -65,8 +57,9 @@ async function createKey() {
     </div>
     <div class="form-group">
         <label for="secretKey">Private key (nsec or hex)</label>
-        <input type="password" placeholder="nsec1..." bind:value={secretKey} />
+        <input type="password" id="secretKey" autocomplete="off" spellcheck="false" placeholder="nsec1..." bind:value={secretKey} />
+        <p class="text-sm text-gray-400">Browser import trusts this page with your private key. For stronger protection, import with the local Keycast CLI on your server.</p>
     </div>
 
-    <button type="submit" class="button button-primary">Securely Add Key</button>
+    <button type="submit" class="button button-primary">Import Key</button>
 </form>

@@ -33,3 +33,7 @@ database/*.db-wal
 *.swp
 *.swo
 Thumbs.db
+
+# Interrupted credential creation and encrypted recovery archives
+.keycast-root.*
+*.kcb

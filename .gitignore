@@ -1,6 +1,7 @@
 .DS_Store
 /target
 /node_modules
+/runtime
 master.key
 *.db
 *.db-shm
@@ -8,3 +9,10 @@ master.key
 .env
 .env.*
 !.env.example
+
+# Host-operation test bytecode
+__pycache__/
+
+# Interrupted credential creation and encrypted recovery archives
+.keycast-root.*
+*.kcb

@@ -1,10 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
-    DEFAULT_AUTHORIZATION_RELAYS,
     DEFAULT_NOSTR_READ_RELAYS,
     DEFAULT_OUTBOX_RELAYS,
-    relayListForInput,
-    parseRelayInput,
 } from "./relays";
 
 const DEAD_RELAYS = [
@@ -22,7 +19,6 @@ describe("relay defaults", () => {
         const defaults = [
             ...DEFAULT_NOSTR_READ_RELAYS,
             ...DEFAULT_OUTBOX_RELAYS,
-            ...DEFAULT_AUTHORIZATION_RELAYS,
         ];
 
         for (const deadRelay of DEAD_RELAYS) {
@@ -32,18 +28,8 @@ describe("relay defaults", () => {
 
     test("include the current public relay replacements", () => {
         for (const requiredRelay of REQUIRED_RELAYS) {
-            expect(DEFAULT_AUTHORIZATION_RELAYS).toContain(requiredRelay);
             expect(DEFAULT_NOSTR_READ_RELAYS).toContain(requiredRelay);
+            expect(DEFAULT_OUTBOX_RELAYS).toContain(requiredRelay);
         }
-    });
-
-    test("formats and parses comma-separated authorization relay input", () => {
-        expect(relayListForInput()).toBe(
-            "wss://nos.lol, wss://relay.primal.net, wss://relay.ditto.pub",
-        );
-        expect(parseRelayInput(" wss://nos.lol, ,wss://relay.primal.net ")).toEqual([
-            "wss://nos.lol",
-            "wss://relay.primal.net",
-        ]);
     });
 });

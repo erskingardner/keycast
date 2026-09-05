@@ -1,31 +1,14 @@
 # AGENTS.md
 
-This file inherits the root `AGENTS.md` guidance. It applies to `signer/`.
+This file inherits the root guidance and applies to `signer/`.
 
-## Signer Responsibilities
+- One signer multiplexes all grants and relay connections; do not reintroduce child daemons.
+- Require a live session before every non-connect NIP-46 operation.
+- Claim invitations atomically, keep same-client retries idempotent, and reject cross-client reuse.
+- Evaluate current strict policy before decrypting a stored key.
+- Verify outer/inner events, exact `p`-tag routing, timestamps, sizes, and method parameters.
+- Store encrypted responses before publication and require at least one relay acknowledgement.
+- Isolate request errors; terminate the process if a long-lived control/relay worker exits.
+- Keep the control socket capability-limited and every status/audit/log surface redacted.
 
-- `keycast_signer` watches authorization rows and manages signer child processes.
-- `signer_daemon` decrypts the bunker key and stored user key for one authorization.
-- NIP-46 requests are approved only after `Authorization::validate_policy` says yes.
-
-## Things To Be Careful With
-
-- The daemon handles decrypted private keys in memory. Keep logs clean and avoid adding debug output
-  that includes secrets or full bunker URIs.
-- Process restarts should not widen authorization. A crashed signer should restart with the same auth
-  ID and the same policy checks.
-- Do not make expiration, max-use, or connection-secret failures look like generic approval.
-- `MASTER_KEY_PATH` is passed to child processes, but the current file key manager reads the root
-  `master.key` path directly. Update both sides if changing key lookup.
-- If policy parsing fails, fail closed.
-
-## Validation
-
-```sh
-cd signer && cargo test
-cargo test --workspace
-cargo build --workspace
-```
-
-Use targeted tests in `core` for policy approval semantics, then run signer builds to catch integration
-breakage.
+Run signer unit tests, `signer/tests/nip46_roundtrip.rs`, and the full workspace suite.

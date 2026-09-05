@@ -1,0 +1,8 @@
+[Unit]
+Description=Daily encrypted Keycast off-host backup
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=15m
+Persistent=true
+[Install]
+WantedBy=timers.target

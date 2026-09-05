@@ -1,187 +1,136 @@
 <script lang="ts">
 import { goto } from "$app/navigation";
 import { page } from "$app/stores";
-import AuthorizationCard from "$lib/components/AuthorizationCard.svelte";
-import Avatar from "$lib/components/Avatar.svelte";
 import Copy from "$lib/components/Copy.svelte";
+import GrantCard from "$lib/components/GrantCard.svelte";
 import Loader from "$lib/components/Loader.svelte";
-import Name from "$lib/components/Name.svelte";
 import PageSection from "$lib/components/PageSection.svelte";
 import { getCurrentUser } from "$lib/current_user.svelte";
 import { KeycastApi } from "$lib/keycast_api.svelte";
-import {
-    loadProfile,
-    userFromPubkey,
-    type NostrProfile,
-} from "$lib/nostr";
-import type {
-    AuthorizationWithRelations,
-    KeyWithRelations,
-    StoredKey,
-    Team,
-} from "$lib/types";
-import { formattedDate } from "$lib/utils/dates";
-import { safeRemoteImageUrl } from "$lib/utils/image_url";
+import type { Grant, InvitationCreationResponse, KeyWithRelations, StoredKey, Team } from "$lib/types";
+import { dateFromUnixSeconds, formattedDate } from "$lib/utils/dates";
 import { CaretRight } from "phosphor-svelte";
 import { toast } from "svelte-hot-french-toast";
 
 const id = $page.params.id ?? "";
 const pubkey = $page.params.pubkey ?? "";
-
 const api = new KeycastApi();
 const user = $derived(getCurrentUser()?.user);
 let isLoading = $state(true);
-let keyAuthHeader: string | null = $state(null);
 let team: Team | null = $state(null);
 let key: StoredKey | null = $state(null);
-let authorizations: AuthorizationWithRelations[] = $state([]);
-let keyUser = $derived(userFromPubkey(pubkey));
-let keyUserProfile = $state<NostrProfile | null>(null);
-let keyUserBannerUrl = $derived(safeRemoteImageUrl(keyUserProfile?.banner));
+let grants: Grant[] = $state([]);
+let invitationUri: string | null = $state(null);
+let loadError: string | null = $state(null);
 
 $effect(() => {
-    if (user?.pubkey && !keyAuthHeader) {
-        api.buildAuthHeader(
-            `/teams/${id}/keys/${pubkey}`,
-            "GET",
-            user.pubkey,
-        )
-            .then((authHeader) => {
-                keyAuthHeader = authHeader;
-                return api.get(`/teams/${id}/keys/${pubkey}`, {
-                    headers: { Authorization: authHeader },
-                });
-            })
-            .then((teamKeyResponse) => {
-                key = (teamKeyResponse as KeyWithRelations).stored_key;
-                team = (teamKeyResponse as KeyWithRelations).team;
-                authorizations = (teamKeyResponse as KeyWithRelations)
-                    .authorizations;
-            })
-            .finally(() => {
-                isLoading = false;
-            });
-    }
-
-    if (key && !keyUserProfile) {
-        loadProfile(pubkey).then((profile) => {
-            keyUserProfile = profile;
-        });
-    }
+    if (!user?.pubkey || !isLoading) return;
+    const endpoint = `/teams/${id}/keys/${pubkey}`;
+    api.buildAuthHeader(endpoint, "GET", user.pubkey)
+        .then((authorization) => api.get<KeyWithRelations>(endpoint, { headers: { Authorization: authorization } }))
+        .then((response) => {
+            key = response.stored_key;
+            team = response.team;
+            grants = response.grants;
+        })
+        .catch((error) => { loadError = error instanceof Error ? error.message : String(error); })
+        .finally(() => { isLoading = false; });
 });
 
 async function removeKey() {
-    if (!user?.pubkey) return;
-    if (
-        !confirm(
-            "Are you sure you want to remove this key from the team?\n\nThis will remove all authorizations associated with this key.",
-        )
-    )
-        return;
-
-    const authHeader = await api.buildAuthHeader(
-        `/teams/${id}/keys/${pubkey}`,
-        "DELETE",
-        user?.pubkey,
-    );
-
-    api.delete(`/teams/${id}/keys/${pubkey}`, {
-        headers: {
-            Authorization: authHeader,
-        },
-    })
-        .then(() => {
-            toast.success("Key removed successfully");
-            goto(`/teams/${id}`);
-        })
-        .catch((error) => {
-            toast.error("Failed to remove key");
-        });
+    if (!user?.pubkey || !confirm("Remove this key and revoke every grant and session attached to it?")) return;
+    try {
+    const endpoint = `/teams/${id}/keys/${pubkey}`;
+    const authorization = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+    await api.delete(endpoint, { headers: { Authorization: authorization } });
+    toast.success("Key removed");
+    await goto(`/teams/${id}`);
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
 }
 
-async function revokeAuthorization(authorization: AuthorizationWithRelations) {
-    if (!user?.pubkey) return;
-    if (!confirm("Revoke this authorization? Existing clients using it will lose access."))
-        return;
-
-    const authorizationId = authorization.authorization.id;
-    const endpoint = `/teams/${id}/keys/${pubkey}/authorizations/${authorizationId}`;
-
+async function revokeGrant(grant: Grant) {
+    if (!user?.pubkey || !confirm("Revoke this grant and all of its active sessions?")) return;
     try {
-        const authHeader = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
-
-        await api.delete(endpoint, {
-            headers: {
-                Authorization: authHeader,
-            },
-        });
-
-        authorizations = authorizations.filter(
-            (item) => item.authorization.id !== authorizationId,
-        );
-        toast.success("Authorization revoked");
+    const endpoint = `/teams/${id}/keys/${pubkey}/grants/${grant.id}`;
+    const authorization = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+    await api.delete(endpoint, { headers: { Authorization: authorization } });
+    grants = grants.map((item) => item.id === grant.id ? { ...item, revoked_at: Math.floor(Date.now() / 1000), active_sessions: 0, claimable_invitations: 0, invitations: [] } : item);
+    toast.success("Grant revoked");
     } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        toast.error(`Failed to revoke authorization: ${message}`);
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
+}
+
+async function createInvitation(grant: Grant) {
+    if (!user?.pubkey) return;
+    try {
+    const endpoint = `/teams/${id}/grants/${grant.id}/invitations`;
+    const request = { expires_at: Math.min(Math.floor(Date.now() / 1000) + 24 * 3600, grant.expires_at ?? Infinity) };
+    const body = JSON.stringify(request);
+    const authorization = await api.buildAuthHeader(endpoint, "POST", user.pubkey, body);
+    const response = await api.post<InvitationCreationResponse>(endpoint, request, { headers: { Authorization: authorization } });
+    invitationUri = response.bunker_uri;
+    grants = grants.map((item) => item.id === grant.id ? { ...item, claimable_invitations: item.claimable_invitations + 1, invitations: [...item.invitations, {id: response.invitation_id, expires_at: request.expires_at}] } : item);
+    toast.success("One-time invitation created");
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
+    }
+}
+async function revokeInvitation(grant: Grant, invitationId: number) {
+    if (!user?.pubkey) return;
+    try {
+        const endpoint = `/teams/${id}/invitations/${invitationId}`;
+        const authorization = await api.buildAuthHeader(endpoint, "DELETE", user.pubkey);
+        await api.delete(endpoint, {headers: {Authorization: authorization}});
+        grants = grants.map(item => item.id === grant.id ? {...item, claimable_invitations: Math.max(0, item.claimable_invitations - 1), invitations: item.invitations.filter(i => i.id !== invitationId)} : item);
+        invitationUri = null;
+        toast.success("Invitation revoked; active sessions are unchanged");
+    } catch (error) {
+        toast.error(error instanceof Error ? error.message : String(error));
     }
 }
 </script>
 
 {#if isLoading}
     <Loader extraClasses="items-center justify-center mt-40" />
-{:else if team &&key}
+{:else if loadError}
+    <p class="input-error">{loadError}</p>
+{:else if team && key}
     <h1 class="page-header flex flex-row gap-1 items-center">
         <a href={`/teams/${id}`} class="bordered">{team.name}</a>
-        <CaretRight size="20" class="text-gray-500" />
-        {key.name}
+        <CaretRight size="20" class="text-gray-500" /> {key.name}
     </h1>
-    <div
-        class="relative"
-    >
-        <div class="absolute inset-0 bg-cover bg-center bg-gray-800 overflow-hidden rounded-lg">
-            {#if keyUserBannerUrl}
-                <img src={keyUserBannerUrl} alt="Banner" referrerpolicy="no-referrer" class="opacity-20 w-full h-full object-cover object-center rounded-lg" />
-            {:else}
-                <div class="w-full h-full bg-gray-800"></div>
-            {/if}
-        </div>
-        <div class="relative p-6 flex items-center gap-4">
-            <Avatar {pubkey} userProfile={keyUserProfile} extraClasses="w-24 h-24" />
-            <div class="flex flex-col gap-1 truncate">
-                <span class="font-semibold text-lg">
-                    <Name {pubkey} userProfile={keyUserProfile} />
-                </span>
-                <span class="text-xs font-mono text-gray-300 flex flex-row gap-2 items-center justify-between truncate">
-                    <span class="truncate">{keyUser?.npub}</span>
-                    <Copy value={keyUser?.npub || ""} size="18" />
-                </span>
-                <span class="text-xs font-mono text-gray-300 flex flex-row gap-2 items-center justify-between truncate">
-                    <span class="truncate">{keyUser?.pubkey}</span>
-                    <Copy value={keyUser?.pubkey || ""} size="18" />
-                </span>
-                <span class="text-xs font-mono text-gray-400 mt-2">
-                    Added: {formattedDate(new Date(key.created_at))}
-                </span>
-            </div>
-        </div>
+
+    <div class="card mb-6">
+        <span class="font-mono text-xs break-all flex items-center gap-2">{key.public_key}<Copy value={key.public_key} /></span>
+        <span class="text-xs text-gray-400">Added {formattedDate(dateFromUnixSeconds(key.created_at))}</span>
     </div>
 
+    {#if invitationUri}
+        <div class="card mb-6 border border-amber-500/60">
+            <h2 class="font-semibold text-amber-300">Copy this invitation now</h2>
+            <p class="text-sm text-gray-300">Its secret is not stored and cannot be shown again.</p>
+            <div class="font-mono text-xs break-all flex items-center gap-2 bg-gray-950 p-3 rounded">
+                <span class="grow">{invitationUri}</span><Copy value={invitationUri} />
+            </div>
+            <button type="button" class="button button-secondary self-start" onclick={() => invitationUri = null}>Dismiss</button>
+        </div>
+    {/if}
 
-    <PageSection title="Key Authorizations">
+    <PageSection title="Remote-signing grants">
         <div class="flex flex-col gap-4 items-start">
-            {#if authorizations.length === 0}
-                <p class="text-gray-500">No authorizations found</p>
+            {#if grants.length === 0}
+                <p class="text-gray-500">No grants found</p>
             {:else}
-                <div class="card-grid">
-                    {#each authorizations as authorization}
-                        <AuthorizationCard
-                            {authorization}
-                            onRevoke={revokeAuthorization}
-                        />
+                <div class="card-grid w-full">
+                    {#each grants as grant}
+                        <GrantCard {grant} onRevoke={revokeGrant} onCreateInvitation={createInvitation} onRevokeInvitation={revokeInvitation} />
                     {/each}
                 </div>
             {/if}
-            <a href={`/teams/${id}/keys/${pubkey}/authorizations/new`} class="button button-primary">Add Authorization</a>
+            <a href={`/teams/${id}/keys/${pubkey}/grants/new`} class="button button-primary">Add grant</a>
         </div>
     </PageSection>
 
