@@ -63,13 +63,13 @@ async function userFromSigninMethod(
     try {
         switch (method) {
             case "extension":
-                return getExtensionUser();
+                return await getExtensionUser();
             case "nip46-bunker":
                 if (!options.bunkerUri) {
                     toast.error("Paste a bunker:// remote signer connection string");
                     return null;
                 }
-                return connectNostrConnectBunker(options.bunkerUri);
+                return await connectNostrConnectBunker(options.bunkerUri);
             default:
                 method satisfies never;
                 return null;
