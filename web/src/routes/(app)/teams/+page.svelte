@@ -1,155 +1,173 @@
 <script lang="ts">
-import Loader from "$lib/components/Loader.svelte";
-import TeamCard from "$lib/components/TeamCard.svelte";
-import { getCurrentUser } from "$lib/current_user.svelte";
-import { KeycastApi } from "$lib/keycast_api.svelte";
-import type { TeamWithRelations } from "$lib/types";
-import { PlusCircle } from "phosphor-svelte";
-import { toast } from "svelte-hot-french-toast";
-
-const api = new KeycastApi();
-const user = $derived(getCurrentUser()?.user);
-let isLoading = $state(true);
-let teamsAuthHeader: string | null = $state(null);
-let teams: TeamWithRelations[] | null = $state(null);
-let teamFormVisible = $state(false);
-let newTeamName = $state("");
-let newTeamError: string | null = $state(null);
-let teamNameInput: HTMLInputElement | null = $state(null);
-
-let inlineTeamFormVisible = $state(false);
-let inlineTeamNameInput: HTMLInputElement | null = $state(null);
-let inlineTeamError: string | null = $state(null);
-let inlineTeamName = $state("");
-
-$effect(() => {
-    if (user?.pubkey && !teamsAuthHeader) {
-        api.buildAuthHeader("/teams", "GET", user.pubkey)
-            .then((authHeader) => {
-                teamsAuthHeader = authHeader;
-                return api.get("/teams", {
-                    headers: { Authorization: authHeader },
-                });
-            })
-            .then((teamsResponse) => {
-                teams = teamsResponse as TeamWithRelations[];
-            })
-            .catch((error) => {
-                console.error(error);
-            })
-            .finally(() => {
-                isLoading = false;
-            });
-    }
-});
-
-function toggleTeamForm() {
-    teamFormVisible = !teamFormVisible;
-    if (teamFormVisible) {
-        setTimeout(() => teamNameInput?.focus(), 0);
-    }
-}
-
-function toggleInlineTeamForm() {
-    inlineTeamFormVisible = !inlineTeamFormVisible;
-    if (inlineTeamFormVisible) {
-        setTimeout(() => inlineTeamNameInput?.focus(), 0);
-    }
-}
-
-async function createTeam(inline = false) {
-    if (!user?.pubkey) return;
-
-    const name = inline ? inlineTeamName : newTeamName;
-
-    const authHeader = await api.buildAuthHeader(
-        "/teams",
-        "POST",
-        user?.pubkey,
-        JSON.stringify({ name }),
+    import { getCurrentUser } from "$lib/current_user.svelte";
+    import { KeycastApi } from "$lib/keycast_api.svelte";
+    import type { TeamWithRelations } from "$lib/types";
+    import TeamWorkspace from "$lib/components/TeamWorkspace.svelte";
+    import Loader from "$lib/components/Loader.svelte";
+    import { Plus, SquaresFour } from "phosphor-svelte";
+    const api = new KeycastApi();
+    const user = $derived(getCurrentUser()?.user);
+    let teams = $state<TeamWithRelations[]>([]);
+    let selected = $state<number | null>(null);
+    let loading = $state(true);
+    let startedFor = $state("");
+    let error = $state("");
+    let creating = $state(false);
+    let busy = $state(false);
+    let name = $state("");
+    let createError = $state("");
+    const activeTeam = $derived(
+        teams.find((team) => team.team.id === selected),
     );
-    api.post<TeamWithRelations>(
-        "/teams",
-        { name },
-        {
-            headers: {
-                Authorization: authHeader,
-            },
-        },
-    )
-        .then((newTeam) => {
-            teams = [...(teams ?? []), newTeam];
-            newTeamName = "";
-            inlineTeamName = "";
-            if (inline) {
-                toggleInlineTeamForm();
-            } else {
-                toggleTeamForm();
-            }
-            toast.success("Team created successfully");
-        })
-        .catch((error) => {
-            toast.error(`Failed to create team: ${error.message}`);
-            if (inline) {
-                inlineTeamError = error.message;
-            } else {
-                newTeamError = error.message;
-            }
-        });
-}
+    $effect(() => {
+        if (user?.pubkey && startedFor !== user.pubkey) {
+            startedFor = user.pubkey;
+            teams = [];
+            selected = null;
+            void load();
+        }
+    });
+    async function load() {
+        if (!user) return;
+        loading = true;
+        error = "";
+        try {
+            const authorization = await api.buildAuthHeader(
+                "/teams",
+                "GET",
+                user.pubkey,
+            );
+            teams = await api.get<TeamWithRelations[]>("/teams", {
+                headers: { Authorization: authorization },
+            });
+            if (!teams.some((team) => team.team.id === selected))
+                selected = teams[0]?.team.id ?? null;
+        } catch (e) {
+            error = e instanceof Error ? e.message : "Could not load teams";
+        } finally {
+            loading = false;
+        }
+    }
+    async function create() {
+        if (!user || busy) return;
+        busy = true;
+        createError = "";
+        try {
+            const request = { name: name.trim() };
+            const authorization = await api.buildAuthHeader(
+                "/teams",
+                "POST",
+                user.pubkey,
+                JSON.stringify(request),
+            );
+            const team = await api.post<TeamWithRelations>("/teams", request, {
+                headers: { Authorization: authorization },
+            });
+            teams = [...teams, team];
+            selected = team.team.id;
+            name = "";
+            creating = false;
+        } catch (e) {
+            createError =
+                e instanceof Error ? e.message : "Could not create team";
+        } finally {
+            busy = false;
+        }
+    }
 </script>
 
-<div class="flex flex-col md:flex-row items-center justify-between mb-4">
-    <h1 class="page-header mb-0! self-start md:self-center">Teams</h1>
-    {#if inlineTeamFormVisible}
-        <form onsubmit={(event) => { event.preventDefault(); createTeam(true); }} class="self-end md:self-center">
-            <div class="flex flex-row gap-2">
-                <input bind:this={inlineTeamNameInput} type="text" placeholder="Team name" bind:value={inlineTeamName} />
-                <button type="submit" class="button button-primary">
-                    Create
-                </button>
-                <button type="button" onclick={toggleInlineTeamForm} class="button button-secondary">
-                    Cancel
-                </button>
-            </div>
-            {#if inlineTeamError}
-                <span class="input-error">{inlineTeamError}</span>
-            {/if}
-        </form>
-    {:else}
-        <button onclick={toggleInlineTeamForm} class="button button-primary button-icon self-end md:self-center">
-            <PlusCircle size="20" />
-            Create a team
-        </button>
-    {/if}
-</div>
-{#if isLoading}
-    <Loader />
-{:else if teams && teams.length > 0}
-    <div class="card-grid">
-        {#each teams as team}
-            <TeamCard team={team} />
-        {/each}
-    </div>
-{:else}
-    <div class="flex flex-col items-center justify-center gap-4">
-        <p>You don't have any teams yet.</p>
-        <button onclick={toggleTeamForm} class="button button-primary button-icon">
-            <PlusCircle size="20" />
-            Create a team
-        </button>
-        {#if teamFormVisible}
-            <form onsubmit={(event) => { event.preventDefault(); createTeam(); }}>
-                <div class="flex flex-row gap-2">
-                    <input bind:this={teamNameInput} type="text" placeholder="Team name" bind:value={newTeamName} />
-                    <button type="submit" class="button button-primary">
-                        Create
-                    </button>
+<svelte:head><title>Workspace — Keycast</title></svelte:head>
+<div class="workspace">
+    <aside class="workspace-rail" aria-label="Teams">
+        <div class="flex items-center justify-between mb-4">
+            <span class="eyebrow">Your teams</span><button
+                class="button button-quiet"
+                aria-label="Create team"
+                aria-expanded={creating}
+                onclick={() => (creating = !creating)}
+                ><Plus size={16} /></button
+            >
+        </div>
+        {#if creating}<form
+                class="mb-5"
+                onsubmit={(event) => {
+                    event.preventDefault();
+                    void create();
+                }}
+            >
+                <label class="eyebrow" for="team-name">Team name</label><input
+                    id="team-name"
+                    type="text"
+                    required
+                    maxlength="120"
+                    bind:value={name}
+                    placeholder="My workspace"
+                    class="mt-2"
+                />{#if createError}<p role="alert" class="input-error mt-2">
+                        {createError}
+                    </p>{/if}
+                <div class="form-actions">
+                    <button class="button button-primary" disabled={busy}
+                        >{busy ? "Creating…" : "Create"}</button
+                    ><button
+                        type="button"
+                        class="button button-quiet"
+                        onclick={() => (creating = false)}>Cancel</button
+                    >
                 </div>
-                {#if newTeamError}
-                    <span class="input-error">{newTeamError}</span>
-                {/if}
-            </form>
-        {/if}
+            </form>{/if}
+        <div class="team-list">
+            {#each teams as team (team.team.id)}<button
+                    class="team-choice"
+                    class:active={selected === team.team.id}
+                    aria-current={selected === team.team.id
+                        ? "true"
+                        : undefined}
+                    onclick={() => (selected = team.team.id)}
+                    ><SquaresFour size={16} class="mt-0.5 shrink-0" /><span
+                        class="min-w-0"
+                        ><span class="block truncate">{team.team.name}</span
+                        ><small
+                            >{team.stored_keys.length}
+                            {team.stored_keys.length === 1 ? "key" : "keys"} · {team
+                                .team_users.length}
+                            {team.team_users.length === 1
+                                ? "member"
+                                : "members"}</small
+                        ></span
+                    ></button
+                >{/each}
+        </div>
+        <p class="rail-note description mt-8 border-t border-line pt-4">
+            Each team has its own keys, policies, and members.
+        </p>
+    </aside>
+    <div class="min-w-0">
+        {#if loading}<Loader />{:else if error}<div class="empty-state">
+                <p class="input-error" role="alert">{error}</p>
+                <button class="button button-secondary mt-3" onclick={load}
+                    >Retry</button
+                >
+            </div>{:else if activeTeam}
+            {#key `${user?.pubkey}:${selected}`}<TeamWorkspace
+                    id={String(activeTeam.team.id)}
+                    initialTeam={activeTeam}
+                    onChanged={(updated) =>
+                        (teams = teams.map((team) =>
+                            team.team.id === updated.team.id ? updated : team,
+                        ))}
+                    onDeleted={load}
+                />{/key}
+        {:else}<p class="eyebrow mb-3">Your workspace starts here</p>
+            <h1 class="page-header">A home for your keys.</h1>
+            <p class="description max-w-lg mt-4">
+                Create your first team to organize keys and define app access. A
+                team can be just you, or the people you work with.
+            </p>
+            <button
+                class="button button-primary mt-6"
+                onclick={() => (creating = true)}
+                ><Plus size={16} />Create a team</button
+            >{/if}
     </div>
-{/if}
+</div>

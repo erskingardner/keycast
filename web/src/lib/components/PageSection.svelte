@@ -1,10 +1,9 @@
 <script lang="ts">
-import type { Snippet } from "svelte";
-
-const { title, children }: { title: string; children: Snippet } = $props();
+    import type { Snippet } from "svelte";
+    let { title, children }: { title: string; children: Snippet } = $props();
 </script>
 
-<div class="my-12">
-    <h2 class="page-subheader">{title}</h2>
+<section class="section">
+    <div class="section-heading"><h2>{title}</h2></div>
     {@render children()}
-</div>
+</section>

@@ -1,52 +1,25 @@
 <script lang="ts">
-import "../app.css";
-import Header from "$lib/components/Header.svelte";
-import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
-import { initApi } from "$lib/keycast_api.svelte";
-import { Toaster } from "svelte-hot-french-toast";
+    import "../app.css";
+    import Header from "$lib/components/Header.svelte";
+    import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
+    import { initApi } from "$lib/keycast_api.svelte";
+    import { Toaster } from "svelte-hot-french-toast";
 
-let { data, children } = $props();
-let keycastCookie = $derived(data.keycastCookie);
-initApi();
+    let { data, children } = $props();
+    let keycastCookie = $derived(data.keycastCookie);
+    initApi();
 
-$effect(() => {
-    if (keycastCookie && getCurrentUser()?.user?.pubkey !== keycastCookie) {
-        setCurrentUser(keycastCookie);
-    }
-});
+    $effect(() => {
+        if (keycastCookie && getCurrentUser()?.user?.pubkey !== keycastCookie) {
+            setCurrentUser(keycastCookie);
+        }
+    });
 </script>
 
-<Toaster />
+<Toaster
+    toastOptions={{
+        style: "background: #252c29; color: #fcfdf8; border-radius: 3px; font-size: 13px;",
+    }}
+/>
 <Header />
-
-<div class="container">
-	<!-- Background orbs -->
-    <div class="fixed inset-0 -z-10">
-        <div class="absolute rounded-full mix-blend-multiply filter blur-3xl top-10 left-1/4 w-[600px] h-[600px] bg-purple-500/10 animate-blob"></div>
-        <div class="absolute rounded-full mix-blend-multiply filter blur-3xl top-1/2 -right-20 w-96 h-96 bg-red-500/10 animate-blob animation-delay-2000"></div>
-        <div class="absolute rounded-full mix-blend-multiply filter blur-3xl bottom-20 left-32 w-72 h-72 bg-orange-500/10 animate-blob animation-delay-5500"></div>
-    </div>
-	{@render children()}
-</div>
-
-
-<style>
-	@keyframes blob {
-        0% { transform: translate(0px, 0px) scale(1); }
-        33% { transform: translate(30px, -50px) scale(1.4); }
-        66% { transform: translate(-20px, 20px) scale(0.8); }
-        100% { transform: translate(0px, 0px) scale(1); }
-    }
-
-    .animate-blob {
-        animation: blob 14s infinite;
-    }
-
-    .animation-delay-2000 {
-        animation-delay: 2s;
-    }
-
-    .animation-delay-5500 {
-        animation-delay: 5.5s;
-    }
-</style>
+<main id="main-content" class="app-main">{@render children()}</main>

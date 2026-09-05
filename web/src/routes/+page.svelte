@@ -1,58 +1,114 @@
-<div class="relative min-h-screen overflow-hidden">
-    <!-- Content -->
-    <div class="flex flex-col items-center justify-center mt-8 md:mt-20 relative">
-        <h1 class="text-4xl md:text-5xl font-extrabold">Work Together</h1>
-        <h1 class="text-2xl md:text-4xl font-light text-gray-400">without losing your keys</h1>
+<script lang="ts">
+    import SignInMenu from "$lib/components/SignInMenu.svelte";
+    import { getCurrentUser } from "$lib/current_user.svelte";
+    import {
+        ArrowUpRight,
+        Key,
+        SlidersHorizontal,
+        PlugsConnected,
+    } from "phosphor-svelte";
+    const user = $derived(getCurrentUser()?.user);
+</script>
 
-        <!-- Feature sections -->
-        <div class="grid md:grid-cols-3 gap-8 max-w-6xl mx-auto mt-20 px-6">
-            <!-- Team Management -->
-            <div class="feature-panel">
-                <h3 class="text-xl font-bold mb-3">Manage Multiple Teams</h3>
-                <p class="text-gray-400">
-                    Easily manage keys across multiple teams with secure, organized access control.
-                </p>
-            </div>
-
-            <!-- Custom Policies -->
-            <div class="feature-panel">
-                <h3 class="text-xl font-bold mb-3">Custom Permissions</h3>
-                <p class="text-gray-400">
-                    Create granular policies to control who can sign, encrypt, or decrypt specific events.
-                </p>
-            </div>
-
-            <!-- NIP-46 Security -->
-            <div class="feature-panel">
-                <h3 class="text-xl font-bold mb-3">Secure Remote Signing</h3>
-                <p class="text-gray-400">
-                    Use NIP-46 remote signing to keep private keys encrypted and secure across all clients.
-                </p>
+<svelte:head
+    ><title>Keycast — Your keys, on your terms</title><meta
+        name="description"
+        content="A personal home for your Nostr keys. Manage access, connect your apps, and keep control with Keycast."
+    /></svelte:head
+>
+<div class="landing">
+    <div class="landing-intro eyebrow">
+        <span>Personal key infrastructure</span><span
+            >Nostr / Remote signing</span
+        >
+    </div>
+    <section class="landing-hero" aria-labelledby="welcome-title">
+        <div>
+            <h1 class="landing-title" id="welcome-title">
+                Your keys.<br />Your server.<br /><span>Your terms.</span>
+            </h1>
+            <p class="landing-description">
+                One home for your Nostr keys. Connect your apps, decide what
+                they can do, and manage access from a single workspace.
+            </p>
+            <div class="flex items-center gap-4 mt-7">
+                {#if user}<a href="/teams" class="button button-primary"
+                        >Open workspace <ArrowUpRight size={16} /></a
+                    >{:else}<SignInMenu />{/if}<span class="description"
+                    >Bring your own signer.</span
+                >
             </div>
         </div>
-    </div>
+        <div class="overview-panel">
+            <div class="overview-title">
+                <span class="eyebrow">From key to connected app</span
+                ><ArrowUpRight size={18} />
+            </div>
+            <div class="overview-step">
+                <span class="eyebrow">01</span>
+                <div>
+                    <h2>A place for your keys</h2>
+                    <p>
+                        Organize keys into teams. Import from your trusted CLI
+                        or use the browser when you need it.
+                    </p>
+                </div>
+            </div>
+            <div class="overview-step">
+                <span class="eyebrow">02</span>
+                <div>
+                    <h2>Access with clear limits</h2>
+                    <p>
+                        Choose which events an app can sign and whether it can
+                        encrypt or decrypt. Everything else is denied.
+                    </p>
+                </div>
+            </div>
+            <div class="overview-step">
+                <span class="eyebrow">03</span>
+                <div>
+                    <h2>Connect. Review. Revoke.</h2>
+                    <p>
+                        Pair an app with a one-time invitation. Review its grant
+                        and session count, or revoke access in place.
+                    </p>
+                </div>
+            </div>
+            <div class="px-5 py-3 border-t border-line flex justify-between">
+                <span class="eyebrow">Self-hosted by design</span><span
+                    class="badge">NIP-46</span
+                >
+            </div>
+        </div>
+    </section>
+    <section class="landing-bottom" aria-label="Workspace capabilities">
+        <article>
+            <Key size={20} weight="light" />
+            <h2>Keep the key. Share the capability.</h2>
+            <p class="description">
+                Connected apps request signatures. They do not receive the
+                managed private key.
+            </p>
+        </article>
+        <article>
+            <SlidersHorizontal size={20} weight="light" />
+            <h2>See the whole picture.</h2>
+            <p class="description">
+                Keys, policies, members, and recent activity together. Fewer
+                pages between you and the decision.
+            </p>
+        </article>
+        <article>
+            <PlugsConnected size={20} weight="light" />
+            <h2>Use the signer you trust.</h2>
+            <p class="description">
+                Sign in with a browser extension or remote signer. Approve
+                management changes with your external key store.
+            </p>
+        </article>
+    </section>
+    <footer class="site-footer">
+        <span>KEYCAST</span><span>Built for a small, self-hosted instance.</span
+        >
+    </footer>
 </div>
-
-<style>
-    .feature-panel::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: -100%;
-        width: 200%;
-        height: 100%;
-        background: linear-gradient(
-            115deg,
-            transparent 0%,
-            transparent 40%,
-            rgba(255, 255, 255, 0.04) 45%,
-            rgba(255, 255, 255, 0.10) 50%,
-            rgba(255, 255, 255, 0.08) 60%,
-            rgba(255, 255, 255, 0.04) 75%,
-            rgba(255, 255, 255, 0.02) 80%,
-            transparent 85%,
-            transparent 100%
-        );
-        pointer-events: none;
-    }
-</style>
