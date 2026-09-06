@@ -47,6 +47,7 @@ impl Database {
             .await?;
 
         Migrator::new(migrations_path).await?.run(&pool).await?;
+        crate::v2::team_slug::backfill_slugs(&pool).await?;
         Ok(Self { pool })
     }
 

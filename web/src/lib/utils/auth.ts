@@ -8,6 +8,7 @@ import {
 } from "$lib/nostr";
 import toast from "svelte-hot-french-toast";
 import { checkPubkeyAllowed } from "./allowlist";
+import { signinDestination } from "./routes";
 
 export type SigninMethod = "extension" | "nip46-bunker";
 export type SigninOptions = {
@@ -51,7 +52,7 @@ export async function completeSignin(
         if (!alreadySignedIn) {
             toast.success("Signed in successfully");
         }
-        goto("/teams");
+        await goto(signinDestination(new URLSearchParams(window.location.search).get("returnTo")));
     }
     return signedInUser;
 }

@@ -1,39 +1,55 @@
 <script lang="ts">
-import { loadProfile, type NostrProfile } from "$lib/nostr";
-import { safeRemoteImageUrl } from "$lib/utils/image_url";
-
-let {
-    pubkey,
-    userProfile,
-    extraClasses,
-}: { pubkey: string; userProfile?: NostrProfile | null; extraClasses: string } = $props();
-
-let profile = $state<NostrProfile | null | undefined>(null);
-let imageUrl = $derived(safeRemoteImageUrl(profile?.picture || profile?.image));
-let fallbackImageUrl = $derived(`https://robohash.org/${encodeURIComponent(pubkey)}`);
-
-$effect(() => {
-    const currentProfile = userProfile;
-    if (currentProfile) {
-        profile = currentProfile;
-        return;
-    }
-
-    let cancelled = false;
-    loadProfile(pubkey).then((fetchedProfile) => {
-        if (!cancelled) {
-            profile = fetchedProfile;
+    import {
+        getCachedProfile,
+        loadProfile,
+        type NostrProfile,
+    } from "$lib/nostr";
+    import { safeRemoteImageUrl } from "$lib/utils/image_url";
+    let {
+        pubkey,
+        userProfile,
+        extraClasses = "size-9",
+    }: {
+        pubkey: string;
+        userProfile?: NostrProfile | null;
+        extraClasses?: string;
+    } = $props();
+    let profile = $state<NostrProfile | null>(null);
+    let failed = $state(false);
+    const imageUrl = $derived(
+        safeRemoteImageUrl(profile?.picture || profile?.image),
+    );
+    $effect(() => {
+        failed = false;
+        if (userProfile !== undefined) {
+            profile = userProfile;
+            return;
         }
+        profile = getCachedProfile(pubkey);
+        let cancelled = false;
+        void loadProfile(pubkey).then((value) => {
+            if (!cancelled) profile = value;
+        });
+        return () => {
+            cancelled = true;
+        };
     });
-
-    return () => {
-        cancelled = true;
-    };
-});
 </script>
 
-{#if imageUrl}
-    <img src={imageUrl} alt="Avatar" referrerpolicy="no-referrer" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
+{#if imageUrl && !failed}
+    <img
+        src={imageUrl}
+        alt=""
+        referrerpolicy="no-referrer"
+        loading="lazy"
+        decoding="async"
+        onerror={() => (failed = true)}
+        class="object-cover rounded-sm shrink-0 {extraClasses}"
+    />
 {:else}
-    <img src={fallbackImageUrl} alt="No-Avatar" referrerpolicy="no-referrer" class="object-cover rounded-full {extraClasses} ring-1 ring-gray-300 dark:ring-gray-500" />
+    <span
+        aria-hidden="true"
+        class="inline-grid place-items-center rounded-sm shrink-0 bg-accent/10 text-accent font-mono text-xs {extraClasses}"
+        >{pubkey.slice(0, 2).toUpperCase()}</span
+    >
 {/if}

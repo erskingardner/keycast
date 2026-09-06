@@ -21,6 +21,11 @@ pub struct RuntimeState {
     pub store: Store,
     pub metrics: Arc<RuntimeMetrics>,
     pub connected_relays: Arc<AtomicUsize>,
+    pub relay_diagnostics: Arc<
+        tokio::sync::RwLock<
+            std::collections::BTreeMap<String, crate::relay_diagnostics::RelayDiagnostics>,
+        >,
+    >,
     pub ready: Arc<AtomicBool>,
     pub integrity_ok: Arc<AtomicBool>,
     pub quarantined_grants: Arc<AtomicUsize>,
@@ -46,6 +51,7 @@ impl RuntimeState {
             store,
             metrics: Arc::new(RuntimeMetrics::default()),
             connected_relays: Arc::new(AtomicUsize::new(0)),
+            relay_diagnostics: Default::default(),
             ready: Arc::new(AtomicBool::new(false)),
             integrity_ok: Arc::new(AtomicBool::new(true)),
             quarantined_grants: Arc::new(AtomicUsize::new(0)),
@@ -191,7 +197,12 @@ pub async fn relay_supervisor(
 ) -> Result<(), StoreError> {
     use nostr::prelude::{Event, RelayMessage, SubscriptionId};
     use std::collections::{BTreeSet, HashMap, HashSet};
-    let client = Client::new();
+    let telemetry = crate::relay_transport::RelayTelemetry::default();
+    let client = Client::builder()
+        .websocket_transport(crate::relay_transport::ObservedTransport(telemetry.clone()))
+        .build();
+    let mut telemetry_flush = tokio::time::interval(Duration::from_secs(1));
+    let mut pending_telemetry = Vec::new();
     let mut notifications = client.notifications();
     let processor = RequestProcessor::new(state.store.clone(), state.metrics.clone());
     let mut workers = tokio::task::JoinSet::new();
@@ -224,14 +235,35 @@ pub async fn relay_supervisor(
                     if let ClientNotification::Message { relay_url, message } = notification {
                         match *message {
                             RelayMessage::EndOfStoredEvents(id) if id.as_ref() == &subscription => {
+                                if let Some(diagnostics) = state.relay_diagnostics.write().await.get_mut(relay_url.as_str().trim_end_matches('/')) {
+                                    diagnostics.subscription("accepted", None, Timestamp::now().as_secs() as i64);
+                                }
+                                telemetry.record(relay_url.as_str(), "subscription_accepted");
                                 accepted.insert(relay_url.to_string());
                                 subscription_retries.remove(relay_url.as_str());
                                 state.store.mark_relay_subscription(relay_url.as_str(),None).await?;
                             }
-                            RelayMessage::Closed { subscription_id, .. } if subscription_id.as_ref() == &subscription => {
+                            RelayMessage::Closed { subscription_id, message } if subscription_id.as_ref() == &subscription => {
                                 accepted.remove(&relay_url.to_string());
-                                state.store.mark_relay_subscription(relay_url.as_str(),Some("subscription rejected")).await?;
+                                let reason = crate::relay_diagnostics::rejection_reason(message.as_ref());
+                                telemetry.record(relay_url.as_str(), if message.starts_with("auth-required:") { "error_subscription_auth" } else if message.starts_with("rate-limited:") { "error_subscription_rate" } else { "error_subscription_other" });
+                                if let Some(diagnostics) = state.relay_diagnostics.write().await.get_mut(relay_url.as_str().trim_end_matches('/')) {
+                                    diagnostics.subscription("rejected", Some(reason), Timestamp::now().as_secs() as i64);
+                                }
+                                state.store.mark_relay_subscription(relay_url.as_str(),Some(reason)).await?;
                                 state.ready.store(false, Ordering::Relaxed);
+                            }
+                            RelayMessage::Auth { .. } => {
+                                telemetry.record(relay_url.as_str(), "auth_required");
+                                if let Some(diagnostics) = state.relay_diagnostics.write().await.get_mut(relay_url.as_str().trim_end_matches('/')) {
+                                    diagnostics.log(Timestamp::now().as_secs() as i64, "info", "Relay requested NIP-42 authentication".into());
+                                }
+                            }
+                            RelayMessage::Ok { status: false, message, .. } => {
+                                telemetry.record(relay_url.as_str(), "error_publication");
+                                if let Some(diagnostics) = state.relay_diagnostics.write().await.get_mut(relay_url.as_str().trim_end_matches('/')) {
+                                    diagnostics.log(Timestamp::now().as_secs() as i64, "warning", format!("Publication rejected: {}", crate::relay_diagnostics::rejection_reason(message.as_ref())));
+                                }
                             }
                             RelayMessage::Event { subscription_id, event } if subscription_id.as_ref() == &subscription => {
                                 let event = event.into_owned();
@@ -331,6 +363,7 @@ pub async fn relay_supervisor(
                     }
                     state.quarantined_grants.store(quarantined,Ordering::Relaxed);
                     let desired = state.store.enabled_relays().await?;
+                    telemetry.configure(&desired);
                     let mut changed = false;
                     for (url,_) in client.relays().await {
                         if !desired.iter().any(|wanted| wanted.trim_end_matches('/') == url.as_str().trim_end_matches('/')) {
@@ -344,8 +377,16 @@ pub async fn relay_supervisor(
                     client.connect().await;
                     let relays = client.relays().await;
                     accepted.retain(|url| relays.iter().any(|(u,r)| u.as_str()==url && r.status().is_connected()));
+                    state.relay_diagnostics.write().await.retain(|url,_| desired.iter().any(|wanted| wanted.trim_end_matches('/') == url));
                     for (url,relay) in &relays {
-                        if !relay.status().is_connected() {state.store.mark_relay_subscription(url.as_str(),Some("disconnected")).await?;}
+                        let previous = state.relay_diagnostics.read().await.get(url.as_str().trim_end_matches('/')).cloned();
+                        let connection = relay.status().to_string().to_lowercase();
+                        let changed = previous.as_ref().is_none_or(|p| p.connection != connection || p.attempts != relay.stats().attempts() || p.successes != relay.stats().success());
+                        if changed && relay.status().is_connected() {
+                            state.store.mark_relay_connected(url.as_str()).await?;
+                        } else if changed && connection == "disconnected" {
+                            state.store.mark_relay_subscription(url.as_str(),Some("disconnected")).await?;
+                        }
                     }
                     subscription_retries.retain(|url,_| relays.keys().any(|u|u.as_str()==url));
                     let connected = relays.values().filter(|r| r.status().is_connected()).count();
@@ -375,6 +416,14 @@ pub async fn relay_supervisor(
                             }
                         }
                     }
+                    {
+                        let mut diagnostics = state.relay_diagnostics.write().await;
+                        for (url, relay) in &relays {
+                            diagnostics.entry(url.as_str().trim_end_matches('/').to_owned()).or_default()
+                                .observe(relay, !subscribed_keys.is_empty(), accepted.contains(&url.to_string()), Timestamp::now().as_secs() as i64);
+                        }
+
+                    }
                     initialized = true;
                     // Encrypted inputs admitted before a crash can resume without relay redelivery.
                     for json in state.store.pending_inputs().await? {
@@ -395,7 +444,24 @@ pub async fn relay_supervisor(
                 }
                 _ = state.reload.notified() => { refresh.reset_immediately(); }
                 _ = prune.tick() => { state.store.prune_requests().await?; }
-                _ = maintenance.tick() => { state.store.maintenance().await?; }
+                _ = telemetry_flush.tick() => {
+                    if pending_telemetry.is_empty() { pending_telemetry = telemetry.drain(); }
+                    state.store.persist_relay_observations(&pending_telemetry).await?;
+                    {
+                        let mut diagnostics = state.relay_diagnostics.write().await;
+                        for event in &pending_telemetry {
+                            if let Some(relay) = diagnostics.get_mut(&event.url) {
+                                if event.category.starts_with("error_") {
+                                    let message = crate::relay_transport::description(event.category);
+                                    relay.log(event.last_at, "warning", message.into());
+                                    if relay.connection != "connected" { relay.transport_error = Some(message); }
+                                }
+                            }
+                        }
+                    }
+                    pending_telemetry.clear();
+                }
+                _ = maintenance.tick() => { state.store.maintenance().await?; state.store.prune_relay_history().await?; }
                 _ = integrity.tick() => {
                     let healthy: String = sqlx::query_scalar::query_scalar("PRAGMA quick_check").fetch_one(&state.store.pool).await?;
                     state.integrity_ok.store(healthy=="ok",Ordering::Relaxed);
@@ -430,6 +496,19 @@ pub async fn relay_supervisor(
     while publishers.join_next().await.is_some() {}
     processor.shutdown_replication().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), client.shutdown()).await;
+    // A graceful stop flushes the last batch; an abrupt crash can lose at most the unflushed buffer.
+    pending_telemetry.extend(telemetry.drain());
+    if !pending_telemetry.is_empty() {
+        match tokio::time::timeout(
+            Duration::from_secs(5),
+            state.store.persist_relay_observations(&pending_telemetry),
+        )
+        .await
+        {
+            Ok(Ok(())) => {}
+            _ => tracing::warn!("could not flush final relay diagnostic counters"),
+        }
+    }
     result
 }
 

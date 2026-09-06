@@ -41,10 +41,14 @@ impl Fixture {
             .execute(&pool)
             .await
             .unwrap();
-        raw_sql(include_str!("../../database/migrations/0001_initial.sql"))
-            .execute(&pool)
-            .await
-            .unwrap();
+        raw_sql(concat!(
+            include_str!("../../database/migrations/0001_initial.sql"),
+            "\n",
+            include_str!("../../database/migrations/0003_relay_reliability.sql")
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
         Self::populate(pool, relay).await
     }
     async fn populate(pool: sqlx_sqlite::SqlitePool, relay: &str) -> Self {
@@ -1084,12 +1088,12 @@ async fn authentication_required_relay_never_reports_signing_ready() {
         loop {
             // Includes startup, before the first refresh: no transient empty-grant readiness.
             assert!(!state.ready.load(Ordering::Relaxed));
-            let rejected: bool = query_scalar(
-                "SELECT EXISTS(SELECT 1 FROM relay_checkpoints WHERE last_error IS NOT NULL)",
-            )
-            .fetch_one(&f.store.pool)
-            .await
-            .unwrap();
+            let rejected = state
+                .relay_diagnostics
+                .read()
+                .await
+                .values()
+                .any(|relay| relay.subscription == "rejected");
             if rejected {
                 break;
             }
@@ -1139,13 +1143,24 @@ async fn changing_relays_preserves_the_live_session_and_serves_on_the_new_subscr
         .execute(&f.store.pool)
         .await
         .unwrap();
+    let next_url = next.url().await;
     state.reload.notify_one();
-    tokio::time::timeout(Duration::from_secs(5),async {
+    tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            let accepted:bool=query_scalar("SELECT EXISTS(SELECT 1 FROM relay_checkpoints WHERE last_connected_at IS NOT NULL AND last_error IS NULL)").fetch_one(&f.store.pool).await.unwrap();
-            if accepted {break;}tokio::time::sleep(Duration::from_millis(10)).await;
+            let accepted = state
+                .relay_diagnostics
+                .read()
+                .await
+                .get(next_url.as_str().trim_end_matches('/'))
+                .is_some_and(|relay| relay.subscription == "accepted");
+            if accepted {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
-    }).await.unwrap();
+    })
+    .await
+    .unwrap();
     observer.remove_relay(first.url().await).await.unwrap();
     first.shutdown();
     observer
@@ -1354,10 +1369,14 @@ async fn runtime_recovers_from_pool_pressure_without_restarting() {
         .connect("sqlite::memory:")
         .await
         .unwrap();
-    raw_sql(include_str!("../../database/migrations/0001_initial.sql"))
-        .execute(&pool)
-        .await
-        .unwrap();
+    raw_sql(concat!(
+        include_str!("../../database/migrations/0001_initial.sql"),
+        "\n",
+        include_str!("../../database/migrations/0003_relay_reliability.sql")
+    ))
+    .execute(&pool)
+    .await
+    .unwrap();
     let f = Fixture::populate(pool, relay.url().await.as_str()).await;
     let state = RuntimeState::new(f.store.clone());
     let (stop, rx) = tokio::sync::watch::channel(false);
@@ -1373,5 +1392,73 @@ async fn runtime_recovers_from_pool_pressure_without_restarting() {
     ready(&state).await;
     stop.send(true).unwrap();
     task.await.unwrap().unwrap();
+    relay.shutdown();
+}
+
+#[tokio::test]
+async fn idle_connected_relays_clear_stale_errors_without_a_signing_subscription() {
+    let relay = LocalRelay::new();
+    relay.run().await.unwrap();
+    let url = relay.url().await;
+    let f = Fixture::new(url.as_str()).await;
+    query("UPDATE grants SET revoked_at=unixepoch()")
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    f.store
+        .mark_relay_subscription(url.as_str(), Some("disconnected"))
+        .await
+        .unwrap();
+    let state = RuntimeState::new(f.store.clone());
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(relay_supervisor(state.clone(), rx));
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            state.reload.notify_one();
+            let connected = state
+                .relay_diagnostics
+                .read()
+                .await
+                .values()
+                .any(|relay| relay.connection == "connected");
+            if connected {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let snapshot = state
+        .relay_diagnostics
+        .read()
+        .await
+        .values()
+        .next()
+        .unwrap()
+        .clone();
+    assert_eq!(snapshot.subscription, "idle");
+    assert!(snapshot.connected_at.is_some());
+    assert!(snapshot.successes > 0);
+    assert!(snapshot.subscription_error.is_none());
+    let checkpoint: (Option<i64>, i64, Option<String>) = sqlx::query_as::query_as(
+        "SELECT last_connected_at,consecutive_failures,last_error FROM relay_checkpoints",
+    )
+    .fetch_one(&f.store.pool)
+    .await
+    .unwrap();
+    assert!(checkpoint.0.is_some());
+    assert_eq!(checkpoint.1, 0);
+    assert!(checkpoint.2.is_none());
+    stop.send(true).unwrap();
+    task.await.unwrap().unwrap();
+    let reliability = f.store.relay_reliability().await.unwrap();
+    let r = reliability.values().next().unwrap();
+    assert!(r.lifetime.attempts >= 1);
+    assert!(r.lifetime.connections >= 1);
+    assert_eq!(
+        r.lifetime.remote_closes, 0,
+        "local shutdown is not a peer-forced close"
+    );
     relay.shutdown();
 }

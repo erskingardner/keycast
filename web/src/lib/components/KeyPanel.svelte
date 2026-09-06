@@ -2,6 +2,7 @@
     import { goto } from "$app/navigation";
     import GrantEditor from "$lib/components/GrantEditor.svelte";
     import Copy from "$lib/components/Copy.svelte";
+    import PublicKeyDetails from "$lib/components/PublicKeyDetails.svelte";
     import GrantCard from "$lib/components/GrantCard.svelte";
     import Loader from "$lib/components/Loader.svelte";
     import { getCurrentUser } from "$lib/current_user.svelte";
@@ -211,12 +212,7 @@
     </div>
 {:else if team && key}
     <div class="flex flex-wrap items-center justify-between gap-3 mb-5">
-        <div class="min-w-0">
-            <p class="eyebrow mb-1">Public key</p>
-            <div class="font-mono text-xs break-all flex items-center gap-2">
-                {key.public_key}<Copy value={key.public_key} />
-            </div>
-        </div>
+        <PublicKeyDetails pubkey={key.public_key} />
         <button class="button button-danger" onclick={removeKey}
             >Remove key</button
         >

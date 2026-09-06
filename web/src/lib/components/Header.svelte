@@ -10,8 +10,7 @@
 <header class="app-header">
     <div class="header-inner">
         <a href={user ? "/teams" : "/"} class="brand" aria-label="Keycast home"
-            ><span class="brand-mark"><Key size={23} weight="bold" /></span
-            >keycast</a
+            ><span class="brand-mark" aria-hidden="true"><Key size={22} weight="regular" /></span>keycast</a
         >
         <nav class="header-nav" aria-label="Main navigation">
             {#if user}
@@ -40,9 +39,7 @@
                     ></button
                 >
             {:else}
-                <span class="eyebrow hidden sm:block"
-                    >Your keys. Your infrastructure.</span
-                >
+                <span class="eyebrow hidden sm:block">self-hosted / nostr</span>
                 <SignInMenu />
             {/if}
         </nav>

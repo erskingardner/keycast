@@ -1,8 +1,14 @@
 <script lang="ts">
+    import {
+        teamSectionPath,
+        type WorkspaceSection,
+    } from "$lib/utils/team_url";
     import { onMount } from "svelte";
+    import UserIdentity from "./UserIdentity.svelte";
     import { getCurrentUser } from "$lib/current_user.svelte";
     import { KeycastApi } from "$lib/keycast_api.svelte";
     import type {
+        Team,
         TeamWithRelations,
         AuditEvent,
         Policy,
@@ -14,7 +20,16 @@
     import PolicyEditor from "./PolicyEditor.svelte";
     import PolicyCard from "./PolicyCard.svelte";
     import Loader from "./Loader.svelte";
-    import { Key, CaretDown, ArrowClockwise, Plus } from "phosphor-svelte";
+    import {
+        CaretDown,
+        ArrowClockwise,
+        Plus,
+        Key,
+        ShieldCheck,
+        Users,
+        Pulse,
+        GearSix,
+    } from "phosphor-svelte";
     import {
         formattedUnixDateTime,
         formattedDate,
@@ -25,14 +40,23 @@
     let {
         id,
         initialTeam,
+        section = "keys",
         onChanged,
         onDeleted,
     }: {
         id: string;
         initialTeam?: TeamWithRelations;
+        section?: WorkspaceSection;
         onChanged?: (team: TeamWithRelations) => void;
         onDeleted?: () => void;
     } = $props();
+    const sections = [
+        { id: "keys", label: "Keys", icon: Key },
+        { id: "policies", label: "Policies", icon: ShieldCheck },
+        { id: "members", label: "Members", icon: Users },
+        { id: "activity", label: "Activity", icon: Pulse },
+        { id: "settings", label: "Settings", icon: GearSix },
+    ] as const;
     const api = new KeycastApi();
     const user = $derived(getCurrentUser()?.user);
     let team = $state<TeamWithRelations | null>(null);
@@ -45,6 +69,8 @@
     let editingPolicy = $state<Policy | undefined>();
     let expandedKey = $state<string | null>(null);
     let busy = $state(false);
+    let teamName = $state("");
+    let nameError = $state("");
     let keyRevision = $state(0);
     let disposed = false;
     const admin = $derived(
@@ -57,6 +83,7 @@
     onMount(() => {
         if (initialTeam) {
             team = initialTeam;
+            teamName = initialTeam.team.name;
             loading = false;
             void loadAudit();
         } else void refresh();
@@ -94,6 +121,7 @@
             const loaded = await read<TeamWithRelations>(`/teams/${id}`);
             if (disposed) return;
             team = loaded;
+            teamName = loaded.team.name;
             keyRevision += 1;
             onChanged?.(team);
             await loadAudit();
@@ -106,6 +134,38 @@
             loading = false;
         }
     }
+    async function renameTeam() {
+        if (!user || !team || !admin || busy || loading) return;
+        const name = teamName.trim();
+        nameError = "";
+        if (!name || [...name].length > 120) {
+            nameError = "Use between 1 and 120 characters.";
+            return;
+        }
+        if (name === team.team.name) return;
+        busy = true;
+        try {
+            const endpoint = `/teams/${id}`;
+            const request = { name };
+            const authorization = await api.buildAuthHeader(
+                endpoint, "PUT", user.pubkey, JSON.stringify(request),
+            );
+            const updated = await api.put<Team>(endpoint, request, {
+                headers: { Authorization: authorization },
+            });
+            if (disposed) return;
+            team = { ...team, team: updated };
+            teamName = updated.name;
+            onChanged?.(team);
+            toast.success("Team name updated");
+            void loadAudit();
+        } catch (e) {
+            if (!disposed) nameError = e instanceof Error ? e.message : "Could not update the team name.";
+        } finally {
+            busy = false;
+        }
+    }
+
     async function saved() {
         form = null;
         editingPolicy = undefined;
@@ -184,248 +244,319 @@
     </div>
     {#if error}<p role="alert" class="input-error mt-3">{error}</p>{/if}
     <div class="stat-strip">
-        <div class="stat">
+        <a class="stat" href={teamSectionPath(team.team, "keys")}>
             <strong
                 >{team.stored_keys.length.toString().padStart(2, "0")}</strong
             ><span>Managed keys</span>
-        </div>
-        <div class="stat">
+        </a>
+        <a class="stat" href={teamSectionPath(team.team, "policies")}>
             <strong>{team.policies.length.toString().padStart(2, "0")}</strong
             ><span>Access policies</span>
-        </div>
-        <div class="stat">
+        </a>
+        <a class="stat" href={teamSectionPath(team.team, "members")}>
             <strong>{team.team_users.length.toString().padStart(2, "0")}</strong
             ><span>Members</span>
-        </div>
+        </a>
     </div>
-    <section class="section" aria-label="Managed keys">
-        <div class="section-heading">
-            <h2>Keys <span>{team.stored_keys.length}</span></h2>
-            {#if admin}<button
-                    class="button button-primary"
-                    aria-expanded={form === "key"}
-                    onclick={() => toggleForm("key")}
-                    ><Plus size={14} />{form === "key"
-                        ? "Close import"
-                        : "Import key"}</button
-                >{/if}
-        </div>
-        {#if form === "key"}<div class="form-panel">
-                <KeyImport {id} onSaved={saved} />
-            </div>{/if}
-        {#if !team.stored_keys.length}<div class="empty-state">
-                Your keys will live here. Import a key, define a policy, then
-                connect your first app.
-            </div>{:else}
-            <div class="border-t border-line">
-                {#each team.stored_keys as key (key.public_key)}
-                    {#snippet keySummary()}
-                        <span class="key-symbol"><Key size={18} /></span><span
-                            class="min-w-0"
-                            ><span class="block text-sm font-medium truncate"
-                                >{key.name}</span
-                            ><span
-                                class="block font-mono text-[11px] text-muted mt-1 truncate"
-                                >{key.public_key.slice(
-                                    0,
-                                    16,
-                                )}…{key.public_key.slice(-8)}</span
-                            ></span
-                        ><span class="key-date text-xs text-muted"
-                            >{formattedDate(
-                                dateFromUnixSeconds(key.created_at),
-                            )}</span
+    <div class="workspace-sections">
+        <nav class="section-rail" aria-label="Team sections">
+            <p class="eyebrow section-rail-label">Explore</p>
+            {#each sections as item}
+                <a
+                    class="section-choice"
+                    class:active={section === item.id}
+                    href={teamSectionPath(team.team, item.id)}
+                    aria-current={section === item.id ? "page" : undefined}
+                >
+                    <item.icon size={16} weight="regular" />
+                    <span>{item.label}</span>
+                    {#if item.id === "keys"}<small
+                            >{team.stored_keys.length}</small
                         >
-                    {/snippet}
-                    {#if admin}<button
-                            class="key-row"
-                            class:selected={expandedKey === key.public_key}
-                            aria-expanded={expandedKey === key.public_key}
-                            onclick={() =>
-                                (expandedKey =
-                                    expandedKey === key.public_key
-                                        ? null
-                                        : key.public_key)}
-                            >{@render keySummary()}<CaretDown
-                                size={14}
-                            /></button
-                        >{:else}<div class="key-row">
-                            {@render keySummary()}
+                    {:else if item.id === "policies"}<small
+                            >{team.policies.length}</small
+                        >
+                    {:else if item.id === "members"}<small
+                            >{team.team_users.length}</small
+                        >{/if}
+                </a>
+            {/each}
+        </nav>
+        <div class="workspace-content">
+            {#if section === "keys"}
+                <section class="section" aria-label="Managed keys">
+                    <div class="section-heading">
+                        <h2>Keys <span>{team.stored_keys.length}</span></h2>
+                        {#if admin}<button
+                                class="button button-primary"
+                                aria-expanded={form === "key"}
+                                onclick={() => toggleForm("key")}
+                                ><Plus size={14} />{form === "key"
+                                    ? "Close import"
+                                    : "Import key"}</button
+                            >{/if}
+                    </div>
+                    {#if form === "key"}<div class="form-panel">
+                            <KeyImport {id} onSaved={saved} />
                         </div>{/if}
-                    {#if admin && expandedKey === key.public_key}<div
-                            class="key-detail"
-                        >
-                            {#key keyRevision}<KeyPanel
+                    {#if !team.stored_keys.length}<div class="empty-state">
+                            Your keys will live here. Import a key, define a
+                            policy, then connect your first app.
+                        </div>{:else}
+                        <div class="border-t border-line">
+                            {#each team.stored_keys as key (key.public_key)}
+                                {#snippet keySummary()}
+                                    <span class="col-span-2 min-w-0">
+                                        <span
+                                            class="block text-sm font-medium truncate mb-2"
+                                            >{key.name}</span
+                                        >
+                                        <UserIdentity pubkey={key.public_key} />
+                                    </span><span
+                                        class="key-date text-xs text-muted"
+                                        >{formattedDate(
+                                            dateFromUnixSeconds(key.created_at),
+                                        )}</span
+                                    >
+                                {/snippet}
+                                {#if admin}<button
+                                        class="key-row"
+                                        class:selected={expandedKey ===
+                                            key.public_key}
+                                        aria-expanded={expandedKey ===
+                                            key.public_key}
+                                        onclick={() =>
+                                            (expandedKey =
+                                                expandedKey === key.public_key
+                                                    ? null
+                                                    : key.public_key)}
+                                        >{@render keySummary()}<CaretDown
+                                            size={14}
+                                        /></button
+                                    >{:else}<div class="key-row">
+                                        {@render keySummary()}
+                                    </div>{/if}
+                                {#if admin && expandedKey === key.public_key}<div
+                                        class="key-detail"
+                                    >
+                                        {#key keyRevision}<KeyPanel
+                                                {id}
+                                                pubkey={key.public_key}
+                                                onRemoved={async () => {
+                                                    expandedKey = null;
+                                                    await refresh();
+                                                }}
+                                            />{/key}
+                                    </div>{/if}
+                            {/each}
+                        </div>
+                    {/if}
+                </section>
+            {:else if section === "policies"}
+                <section class="section" aria-label="Access policies">
+                    <div class="section-heading">
+                        <h2>Policies <span>{team.policies.length}</span></h2>
+                        {#if admin}<button
+                                class="button button-secondary"
+                                aria-expanded={form === "policy"}
+                                onclick={() => toggleForm("policy")}
+                                >{form === "policy"
+                                    ? "Close editor"
+                                    : "New policy"}</button
+                            >{/if}
+                    </div>
+                    {#if form === "policy"}<div class="form-panel">
+                            {#key editingPolicy?.id}<PolicyEditor
                                     {id}
-                                    pubkey={key.public_key}
-                                    onRemoved={async () => {
-                                        expandedKey = null;
-                                        await refresh();
-                                    }}
+                                    policy={editingPolicy}
+                                    onSaved={saved}
                                 />{/key}
                         </div>{/if}
-                {/each}
-            </div>
-        {/if}
-    </section>
-    <div class="workspace-grid">
-        <section class="section" aria-label="Access policies">
-            <div class="section-heading">
-                <h2>Policies <span>{team.policies.length}</span></h2>
-                {#if admin}<button
-                        class="button button-secondary"
-                        aria-expanded={form === "policy"}
-                        onclick={() => toggleForm("policy")}
-                        >{form === "policy"
-                            ? "Close editor"
-                            : "New policy"}</button
-                    >{/if}
-            </div>
-            {#if form === "policy"}<div class="form-panel">
-                    {#key editingPolicy?.id}<PolicyEditor
-                            {id}
-                            policy={editingPolicy}
-                            onSaved={saved}
-                        />{/key}
-                </div>{/if}
-            {#if !team.policies.length}<div class="empty-state">
-                    Define what connected apps can do. Any capability you do not
-                    allow is denied.
-                </div>{/if}
-            {#each team.policies as policy (policy.id)}<div class="policy-row">
-                    <PolicyCard
-                        {policy}
-                        onEdit={admin
-                            ? (item) => {
-                                  editingPolicy = item;
-                                  form = "policy";
-                              }
-                            : undefined}
-                        onRemove={admin ? removePolicy : undefined}
-                    />
-                </div>{/each}
-        </section>
-        <section class="section" aria-label="Team members">
-            <div class="section-heading">
-                <h2>Members <span>{team.team_users.length}</span></h2>
-                {#if admin}<button
-                        class="button button-secondary"
-                        aria-expanded={form === "member"}
-                        onclick={() => toggleForm("member")}
-                        >{form === "member"
-                            ? "Close form"
-                            : "Add member"}</button
-                    >{/if}
-            </div>
-            {#if form === "member"}<div class="form-panel">
-                    <MemberEditor {id} onSaved={saved} />
-                </div>{/if}
-            {#each team.team_users as member (member.user_public_key)}
-                <div class="member-row">
-                    <span class="member-initial"
-                        >{member.user_public_key
-                            .slice(0, 2)
-                            .toUpperCase()}</span
-                    >
-                    <div class="min-w-0 grow">
-                        <p
-                            class="font-mono text-[11px] truncate"
-                            title={member.user_public_key}
+                    {#if !team.policies.length}<div class="empty-state">
+                            Define what connected apps can do. Any capability
+                            you do not allow is denied.
+                        </div>{/if}
+                    {#each team.policies as policy (policy.id)}<div
+                            class="policy-row"
                         >
-                            {member.user_public_key.slice(
-                                0,
-                                12,
-                            )}…{member.user_public_key.slice(
-                                -6,
-                            )}{member.user_public_key === user?.pubkey
-                                ? " · you"
-                                : ""}
-                        </p>
-                        <p class="text-muted text-[11px] mt-1">
-                            Joined {formattedDate(
-                                dateFromUnixSeconds(member.created_at),
-                            )}
-                        </p>
+                            <PolicyCard
+                                {policy}
+                                onEdit={admin
+                                    ? (item) => {
+                                          editingPolicy = item;
+                                          form = "policy";
+                                      }
+                                    : undefined}
+                                onRemove={admin ? removePolicy : undefined}
+                            />
+                        </div>{/each}
+                </section>
+            {:else if section === "members"}
+                <section class="section" aria-label="Team members">
+                    <div class="section-heading">
+                        <h2>Members <span>{team.team_users.length}</span></h2>
+                        {#if admin}<button
+                                class="button button-secondary"
+                                aria-expanded={form === "member"}
+                                onclick={() => toggleForm("member")}
+                                >{form === "member"
+                                    ? "Close form"
+                                    : "Add member"}</button
+                            >{/if}
                     </div>
-                    <span
-                        class="badge"
-                        class:badge-neutral={member.role !== "admin"}
-                        >{member.role}</span
-                    >{#if admin}<button
-                            class="button button-quiet"
-                            disabled={busy}
-                            aria-label={`Remove member ${member.user_public_key}`}
-                            onclick={() => removeMember(member)}>Remove</button
-                        >{/if}
-                </div>
-            {/each}
-        </section>
-    </div>
-    <section class="section" aria-label="Recent activity">
-        <div class="section-heading">
-            <h2>Recent activity</h2>
-            <span class="eyebrow"
-                >{auditLoading ? "Loading…" : "Latest signed actions"}</span
-            >
+                    {#if form === "member"}<div class="form-panel">
+                            <MemberEditor {id} onSaved={saved} />
+                        </div>{/if}
+                    {#each team.team_users as member (member.user_public_key)}
+                        <div class="member-row">
+                            <div class="min-w-0 grow">
+                                <UserIdentity
+                                    pubkey={member.user_public_key}
+                                    isYou={member.user_public_key ===
+                                        user?.pubkey}
+                                />
+                                <p class="text-muted text-[11px] mt-1">
+                                    Joined {formattedDate(
+                                        dateFromUnixSeconds(member.created_at),
+                                    )}
+                                </p>
+                            </div>
+                            <span
+                                class="badge"
+                                class:badge-neutral={member.role !== "admin"}
+                                >{member.role}</span
+                            >{#if admin}<button
+                                    class="button button-danger"
+                                    disabled={busy}
+                                    aria-label={`Remove member ${member.user_public_key}`}
+                                    onclick={() => removeMember(member)}
+                                    >Remove</button
+                                >{/if}
+                        </div>
+                    {/each}
+                </section>
+            {:else if section === "activity"}
+                <section class="section" aria-label="Recent activity">
+                    <div class="section-heading">
+                        <h2>Recent activity</h2>
+                        <span class="eyebrow"
+                            >{auditLoading
+                                ? "Loading…"
+                                : "Latest signed actions"}</span
+                        >
+                    </div>
+                    {#if auditError}<p class="input-error" role="alert">
+                            {auditError}
+                        </p>{:else if !auditLoading && !events.length}<div
+                            class="empty-state"
+                        >
+                            No activity yet. Signed management and signing
+                            actions will appear here.
+                        </div>{:else}
+                        <div class="table-scroll">
+                            <table class="data-table">
+                                <thead
+                                    ><tr
+                                        ><th>Action</th><th>Outcome</th><th
+                                            >Actor / reason</th
+                                        ><th>Time</th></tr
+                                    ></thead
+                                ><tbody
+                                    >{#each events as event (event.id)}<tr
+                                            ><td class="font-mono"
+                                                >{event.action}</td
+                                            ><td
+                                                ><span
+                                                    class="badge"
+                                                    class:badge-danger={event.outcome ===
+                                                        "denied" ||
+                                                        event.outcome ===
+                                                            "failed"}
+                                                    >{event.outcome}</span
+                                                ></td
+                                            ><td
+                                                class="text-muted font-mono text-[11px]"
+                                                >{#if event.actor_public_key}<UserIdentity
+                                                        pubkey={event.actor_public_key}
+                                                    />{:else}system{/if}
+                                                {#if event.reason_code}<span
+                                                        class="block mt-1"
+                                                        >{event.reason_code}</span
+                                                    >{/if}</td
+                                            ><td
+                                                class="text-muted whitespace-nowrap"
+                                                >{formattedUnixDateTime(
+                                                    event.occurred_at,
+                                                )}</td
+                                            ></tr
+                                        >{/each}</tbody
+                                >
+                            </table>
+                        </div>
+                    {/if}
+                </section>
+            {:else if section === "settings"}
+                <section class="section" aria-label="Team settings">
+                    <div class="section-heading"><h2>Settings</h2></div>
+                    {#if admin}
+                        <form class="border-t border-line pt-5 pb-6" onsubmit={(event) => {
+                            event.preventDefault();
+                            void renameTeam();
+                        }}>
+                            <label class="eyebrow" for="workspace-name">Team name</label>
+                            <div class="flex flex-wrap items-start gap-3 mt-2 max-w-xl">
+                                <input id="workspace-name" class="grow min-w-0 basis-56" type="text" required maxlength="120"
+                                    bind:value={teamName} disabled={busy || loading}
+                                    aria-invalid={nameError ? true : undefined}
+                                    aria-describedby={nameError ? "workspace-name-error" : "workspace-name-help"} />
+                                <button class="button button-primary" type="submit"
+                                    disabled={busy || loading || !teamName.trim() || teamName.trim() === team.team.name}>
+                                    {busy ? "Saving…" : "Save name"}
+                                </button>
+                            </div>
+                            <p id="workspace-name-help" class="description mt-2">Your team's URL stays the same when you rename it.</p>
+                            {#if nameError}<p id="workspace-name-error" class="input-error mt-2" role="alert">{nameError}</p>{/if}
+                        </form>
+                    {/if}
+                    <dl class="team-settings-info">
+                        {#if !admin}<div>
+                            <dt class="eyebrow">Team name</dt>
+                            <dd>{team.team.name}</dd>
+                        </div>{/if}
+                        <div>
+                            <dt class="eyebrow">Created</dt>
+                            <dd>
+                                {formattedDate(
+                                    dateFromUnixSeconds(team.team.created_at),
+                                )}
+                            </dd>
+                        </div>
+                    </dl>
+                    {#if admin}
+                        <div class="mt-8 border-t border-line pt-5">
+                            <h3 class="text-sm mb-2">Delete team</h3>
+                            <p class="description mb-4">
+                                Deleting this team removes its keys and revokes
+                                all related access.
+                            </p>
+                            <button
+                                class="button button-danger"
+                                disabled={busy}
+                                onclick={() =>
+                                    remove(
+                                        `/teams/${id}`,
+                                        "Permanently delete this team, its keys, and all attached access?",
+                                        () => onDeleted?.(),
+                                    )}
+                            >
+                                Delete team
+                            </button>
+                        </div>
+                    {:else}<p class="description mt-6">
+                            Only team administrators can change team settings.
+                        </p>{/if}
+                </section>
+            {/if}
         </div>
-        {#if auditError}<p class="input-error" role="alert">
-                {auditError}
-            </p>{:else if !auditLoading && !events.length}<div
-                class="empty-state"
-            >
-                No activity yet. Signed management and signing actions will
-                appear here.
-            </div>{:else}
-            <div class="table-scroll">
-                <table class="data-table">
-                    <thead
-                        ><tr
-                            ><th>Action</th><th>Outcome</th><th
-                                >Actor / reason</th
-                            ><th>Time</th></tr
-                        ></thead
-                    ><tbody
-                        >{#each events.slice(0, 12) as event (event.id)}<tr
-                                ><td class="font-mono">{event.action}</td><td
-                                    ><span
-                                        class="badge"
-                                        class:badge-danger={event.outcome ===
-                                            "denied" ||
-                                            event.outcome === "failed"}
-                                        >{event.outcome}</span
-                                    ></td
-                                ><td class="text-muted font-mono text-[11px]"
-                                    >{event.actor_public_key
-                                        ? `${event.actor_public_key.slice(0, 10)}…`
-                                        : "system"}{event.reason_code
-                                        ? ` / ${event.reason_code}`
-                                        : ""}</td
-                                ><td class="text-muted whitespace-nowrap"
-                                    >{formattedUnixDateTime(
-                                        event.occurred_at,
-                                    )}</td
-                                ></tr
-                            >{/each}</tbody
-                    >
-                </table>
-            </div>
-        {/if}
-    </section>
-    {#if admin}<details class="mt-8 border-t border-line pt-4">
-            <summary class="text-xs text-muted">Team settings</summary>
-            <p class="description mt-4 mb-3">
-                Deleting this team removes its keys and revokes all related
-                access.
-            </p>
-            <button
-                class="button button-danger"
-                disabled={busy}
-                onclick={() =>
-                    remove(
-                        `/teams/${id}`,
-                        "Permanently delete this team, its keys, and all attached access?",
-                        () => onDeleted?.(),
-                    )}>Delete team</button
-            >
-        </details>{/if}
+    </div>
 {/if}

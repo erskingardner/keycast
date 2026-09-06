@@ -544,6 +544,19 @@ mod tests {
         .execute(&pool)
         .await
         .unwrap();
+        raw_sql(include_str!(
+            "../../../../../database/migrations/0002_team_slugs.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        raw_sql(include_str!(
+            "../../../../../database/migrations/0003_relay_reliability.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
 
         query("UPDATE instance_settings SET instance_id='test-instance'")
             .execute(&pool)

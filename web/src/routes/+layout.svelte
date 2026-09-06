@@ -18,7 +18,7 @@
 
 <Toaster
     toastOptions={{
-        style: "background: #252c29; color: #fcfdf8; border-radius: 3px; font-size: 13px;",
+        style: "background: #242c27; color: #dce1df; border: 1px solid #47534b; border-radius: 2px; font-size: 13px;",
     }}
 />
 <Header />

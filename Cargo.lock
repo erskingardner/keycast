@@ -1174,6 +1174,7 @@ dependencies = [
 name = "keycast_signer"
 version = "0.1.0"
 dependencies = [
+ "async-wsocket",
  "axum",
  "base64 0.23.1",
  "chrono",

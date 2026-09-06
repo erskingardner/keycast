@@ -1,8 +1,9 @@
 <script lang="ts">
+    import RelayHealthRow from "$lib/components/RelayHealthRow.svelte";
     import Loader from "$lib/components/Loader.svelte";
     import { getCurrentUser } from "$lib/current_user.svelte";
     import { KeycastApi } from "$lib/keycast_api.svelte";
-    import type { RelayStatus, StatusResponse } from "$lib/types";
+    import type { StatusResponse } from "$lib/types";
     import { formattedUnixDateTime } from "$lib/utils/dates";
     import {
         ArrowClockwise,
@@ -87,15 +88,6 @@
             isSaving = false;
         }
     }
-
-    function relayHealthy(relay: RelayStatus): boolean {
-        return (
-            relay.enabled &&
-            relay.last_connected_at !== null &&
-            relay.last_error === null &&
-            relay.consecutive_failures === 0
-        );
-    }
 </script>
 
 <div class="flex flex-row items-center justify-between mb-6">
@@ -129,16 +121,16 @@
                         class="text-accent"
                         size="22"
                     />{:else}<WarningCircle
-                        class="text-amber-800"
+                        class="text-warning"
                         size="22"
                     />{/if}
                 <h2 class="font-bold">Signer</h2>
             </div>
             <p>{status.signer.ready ? "Ready" : "Not ready"}</p>
-            {#if status.signer.recovery_pending}<p class="text-amber-800">
+            {#if status.signer.recovery_pending}<p class="text-warning">
                     Signing paused for restore review.
                 </p>{/if}
-            {#if status.signer.quarantined_grants > 0}<p class="text-amber-800">
+            {#if status.signer.quarantined_grants > 0}<p class="text-warning">
                     {status.signer.quarantined_grants} grants need repair; other
                     grants continue.
                 </p>{/if}
@@ -184,7 +176,7 @@
                     .signer.resources.pending_responses} pending replies
             </p>
             {#if status.signer.resources.oldest_response_age_seconds > 60}<p
-                    class="text-amber-800"
+                    class="text-warning"
                 >
                     Oldest pending reply: {status.signer.resources
                         .oldest_response_age_seconds}s
@@ -202,43 +194,12 @@
 
     <div class="card mb-5">
         <h2 class="text-xl font-bold mb-4">Relay health</h2>
-        <div class="flex flex-col gap-3">
-            {#each status.relays as relay}
-                <div
-                    class="flex flex-col md:flex-row md:items-center md:justify-between gap-1 border-b border-line pb-3 last:border-0"
-                >
-                    <div class="flex items-center gap-2">
-                        {#if relayHealthy(relay)}<CheckCircle
-                                class="text-accent"
-                                size="18"
-                            />{:else}<WarningCircle
-                                class="text-amber-800"
-                                size="18"
-                            />{/if}
-                        <code>{relay.url}</code>
-                    </div>
-                    <div class="text-sm text-muted md:text-right">
-                        <div>
-                            {relay.enabled
-                                ? `failures: ${relay.consecutive_failures}`
-                                : "disabled"} · connected {formattedUnixDateTime(
-                                relay.last_connected_at,
-                            )}
-                        </div>
-                        <div>
-                            received {formattedUnixDateTime(
-                                relay.last_received_at,
-                            )} · published {formattedUnixDateTime(
-                                relay.last_published_at,
-                            )}
-                        </div>
-                        {#if relay.last_error}<div class="text-amber-800">
-                                {relay.last_error}
-                            </div>{/if}
-                    </div>
-                </div>
-            {/each}
-        </div>
+        <p class="description mb-2">
+            Expand a relay for connection details and recent history.
+        </p>
+        {#each status.relays as relay (relay.id)}<RelayHealthRow
+                {relay}
+            />{/each}
     </div>
 
     <div class="card mb-5">

@@ -1,4 +1,5 @@
 <script lang="ts">
+    import UserIdentity from "./UserIdentity.svelte";
     import { goto } from "$app/navigation";
     import { getCurrentUser } from "$lib/current_user.svelte";
     import { KeycastApi } from "$lib/keycast_api.svelte";
@@ -7,6 +8,7 @@
         $props();
     const api = new KeycastApi();
     let pubkey = $state("");
+    const memberPreview = $derived(userFromPubkeyOrNpub(pubkey));
     let role: "admin" | "member" = $state("member");
     let error = $state("");
     let busy = $state(false);
@@ -58,6 +60,9 @@
             placeholder="npub1…"
         />
     </div>
+    {#if memberPreview}<div class="mb-4">
+            <UserIdentity pubkey={memberPreview.pubkey} />
+        </div>{/if}
     <div class="form-group">
         <label for="member-role">Role</label><select
             id="member-role"

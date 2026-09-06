@@ -1,6 +1,6 @@
 import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 import adapter from "@sveltejs/adapter-node";
-import { cspDirectives } from "./src/lib/server/csp.js";
+import { createCspDirectives } from "./src/lib/server/csp.js";
 
 /** @type {import('@sveltejs/kit').Config} */
 const config = {
@@ -15,7 +15,7 @@ const config = {
         adapter: adapter(),
         csp: {
             mode: "auto",
-            directives: cspDirectives,
+            directives: createCspDirectives(process.env.VITE_DOMAIN),
         },
     },
 };

@@ -6,11 +6,13 @@
         size = "16",
         showText = false,
         extraClasses = "",
+        label = "Copy",
     }: {
         value: string;
         size?: string;
         showText?: boolean;
         extraClasses?: string;
+        label?: string;
     } = $props();
     let copied = $state(false);
     async function copy() {
@@ -27,11 +29,12 @@
 <button
     type="button"
     onclick={copy}
-    aria-label={copied ? "Copied" : "Copy to clipboard"}
+    aria-label={copied ? "Copied" : `${label} to clipboard`}
+    title={copied ? "Copied" : label}
     class="inline-flex items-center gap-1 p-1 shrink-0 {extraClasses}"
 >
     {#if copied}<Check weight="bold" {size} class="text-accent" />{:else}<Copy
             {size}
         />{/if}
-    {#if showText}{copied ? "Copied" : "Copy"}{/if}
+    {#if showText}{copied ? "Copied" : label}{/if}
 </button>

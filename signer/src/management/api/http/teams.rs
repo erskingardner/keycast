@@ -48,6 +48,8 @@ pub async fn create_team(
         .bind(request.name.trim())
         .fetch_one(&mut *transaction)
         .await?;
+    keycast_core::v2::team_slug::assign_slug(&mut transaction, team_id, request.name.trim())
+        .await?;
     query("INSERT INTO team_members(team_id, user_public_key, role) VALUES (?, ?, 'admin')")
         .bind(team_id)
         .bind(&actor)
@@ -617,9 +619,13 @@ pub async fn status(
     )
     .fetch_all(&state.db)
     .await?;
+    let diagnostics = state.signer.runtime.relay_diagnostics.read().await.clone();
+    let mut reliability = state.signer.runtime.store.relay_reliability().await?;
     let relays = relay_rows
         .into_iter()
         .map(|row| RelayStatus {
+            diagnostics: diagnostics.get(row.1.trim_end_matches('/')).cloned(),
+            reliability: reliability.remove(&row.0),
             id: row.0,
             url: row.1,
             enabled: row.2 == 1,
@@ -750,6 +756,8 @@ pub async fn update_relays(
     Ok(Json(
         rows.into_iter()
             .map(|row| RelayStatus {
+                diagnostics: None,
+                reliability: None,
                 id: row.0,
                 url: row.1,
                 enabled: row.2 == 1,
@@ -842,8 +850,8 @@ async fn require_grant_for_key(
 }
 
 async fn team(pool: &sqlx_sqlite::SqlitePool, id: i64) -> ApiResult<Team> {
-    let row: (i64, String, i64, i64) =
-        query_as("SELECT id, name, created_at, updated_at FROM teams WHERE id = ?")
+    let row: (i64, String, i64, i64, Option<String>) =
+        query_as("SELECT id, name, created_at, updated_at, slug FROM teams WHERE id = ?")
             .bind(id)
             .fetch_optional(pool)
             .await?
@@ -853,6 +861,7 @@ async fn team(pool: &sqlx_sqlite::SqlitePool, id: i64) -> ApiResult<Team> {
         name: row.1,
         created_at: row.2,
         updated_at: row.3,
+        slug: row.4,
     })
 }
 

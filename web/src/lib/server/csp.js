@@ -11,7 +11,7 @@ const quotedSources = new Set([
 /** @typedef {Record<string, string[] | true>} CspDirectiveMap */
 
 /** @type {CspDirectiveMap} */
-export const cspDirectives = {
+const baseDirectives = {
     "default-src": ["self"],
     "base-uri": ["self"],
     "object-src": ["none"],
@@ -21,18 +21,37 @@ export const cspDirectives = {
     "style-src": ["self", "unsafe-inline"],
     "img-src": ["self", "data:", "blob:", "https:", "http:"],
     "font-src": ["self", "data:"],
-    "connect-src": [
-        "self",
-        "https:",
-        "wss:",
-        "ws:",
-        "http://localhost:3100",
-        "http://127.0.0.1:3100",
-        "http://localhost:3000",
-        "http://127.0.0.1:3000",
-    ],
+    "connect-src": ["self", "https:", "wss:", "ws:"],
     "upgrade-insecure-requests": true,
 };
+
+/**
+ * Permit only the configured local API origin for split-port development.
+ * HTTP loopback has no TLS endpoint, so upgrading its requests would break it.
+ * Production and remote HTTPS configurations retain the default policy.
+ * @param {string | undefined} apiUrl
+ * @returns {CspDirectiveMap}
+ */
+export function createCspDirectives(apiUrl) {
+    const directives = Object.fromEntries(
+        Object.entries(baseDirectives).map(([name, value]) => [
+            name,
+            Array.isArray(value) ? [...value] : value,
+        ]),
+    );
+    if (!apiUrl) return directives;
+    const url = new URL(apiUrl);
+    if (url.protocol !== "http:") return directives;
+    if (!["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) {
+        throw new Error("HTTP API origins are supported only on loopback");
+    }
+    const sources = directives["connect-src"];
+    if (Array.isArray(sources)) sources.push(url.origin);
+    delete directives["upgrade-insecure-requests"];
+    return directives;
+}
+
+export const cspDirectives = createCspDirectives(undefined);
 
 /** @param {string} source */
 const formatSource = (source) => {

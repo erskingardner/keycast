@@ -9,12 +9,13 @@ import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { RelayPool } from "applesauce-relay";
 import type { ISigner } from "applesauce-signers";
 import { ExtensionSigner, NostrConnectSigner } from "applesauce-signers";
-import { catchError, filter, firstValueFrom, of, timeout } from "rxjs";
+import { catchError, firstValueFrom, of, timeout, takeUntil, timer, toArray, filter, take } from "rxjs";
 import {
     DEFAULT_NOSTR_READ_RELAYS,
     DEFAULT_OUTBOX_RELAYS,
     REQUIRED_PUBLIC_RELAYS,
 } from "$lib/utils/relays";
+import { ProfileCache, profileFromEvents } from "./utils/profile_cache";
 import { MANAGEMENT_KIND, MANAGEMENT_READ_KIND } from "./utils/management";
 
 export type NostrUser = {
@@ -63,7 +64,21 @@ createEventLoaderForStore(eventStore, relayPool, {
     lookupRelays: loaderRelays,
 });
 
-const profileCache = new Map<string, Promise<NostrProfile | null>>();
+const profileCache = new ProfileCache(
+    async (pubkey) => {
+        const events = await firstValueFrom(
+            relayPool.request(loaderRelays, { kinds: [0], authors: [pubkey], limit: 1 }).pipe(
+                filter((event) => event.kind === 0 && event.pubkey === pubkey && event.content.length <= 64 * 1024),
+                take(32),
+                takeUntil(timer(PROFILE_LOAD_TIMEOUT_MS)),
+                catchError(() => of()),
+                toArray(),
+            ),
+        );
+        return profileFromEvents(pubkey, events);
+    },
+    () => typeof window === "undefined" ? undefined : window.localStorage,
+);
 
 export function normalizePubkey(pubkeyOrNpub: string): string | null {
     const input = pubkeyOrNpub.trim();
@@ -280,31 +295,17 @@ function browserOrigin(): string | undefined {
     return typeof location === "undefined" ? undefined : location.origin;
 }
 
+export function getCachedProfile(pubkey: string): NostrProfile | null {
+    const normalized = normalizePubkey(pubkey);
+    return normalized ? profileCache.peek(normalized) : null;
+}
+
 export async function loadProfile(
     pubkey: string | null | undefined,
 ): Promise<NostrProfile | null> {
     const normalized = pubkey ? normalizePubkey(pubkey) : null;
-    if (!normalized) return null;
-
-    const cached = profileCache.get(normalized);
-    if (cached) return cached;
-
-    const promise = firstValueFrom(
-        eventStore.profile(normalized).pipe(
-            filter((profile): profile is NostrProfile => !!profile),
-            timeout({ first: PROFILE_LOAD_TIMEOUT_MS }),
-            catchError(() => of(null)),
-        ),
-    ).then((profile) => {
-        if (!profile) {
-            profileCache.delete(normalized);
-        }
-
-        return profile;
-    });
-
-    profileCache.set(normalized, promise);
-    return promise;
+    if (!normalized || typeof window === "undefined") return null;
+    return profileCache.load(normalized);
 }
 
 export async function loadFollowPubkeys(

@@ -298,7 +298,7 @@
             {/if}
 
             {#if connectError}
-                <p class="mt-2 text-sm text-red-700">{connectError}</p>
+                <p class="mt-2 text-sm text-danger">{connectError}</p>
             {/if}
         </div>
 

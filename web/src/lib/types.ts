@@ -16,6 +16,7 @@ export type User = {
 export type Team = {
     id: number;
     name: string;
+    slug: string | null;
     created_at: number;
     updated_at: number;
 };
@@ -118,6 +119,42 @@ export type RelayStatus = {
     last_published_at: number | null;
     consecutive_failures: number;
     last_error: string | null;
+    diagnostics: RelayDiagnostics | null;
+    reliability: RelayReliability | null;
+};
+
+export type RelayReliabilityCounts = {
+    attempts: number;
+    retries: number;
+    connections: number;
+    remote_closes: number;
+    connection_losses: number;
+    errors: number;
+    cancelled_attempts: number;
+    dropped_observations: number;
+};
+export type RelayReliability = {
+    tracking_since: number | null;
+    window_start: number;
+    lifetime: RelayReliabilityCounts;
+    last_7_days: RelayReliabilityCounts;
+    categories: { category: string; message: string; count: number }[];
+    history: { category: string; message: string; count: number; first_at: number; last_at: number }[];
+};
+
+export type RelayDiagnostics = {
+    connection: string;
+    subscription: "idle" | "pending" | "accepted" | "rejected";
+    observed_at: number;
+    connected_at: number | null;
+    attempts: number;
+    successes: number;
+    bytes_sent: number;
+    bytes_received: number;
+    latency_ms: number | null;
+    subscription_error: string | null;
+    transport_error: string | null;
+    history: { occurred_at: number; level: "info" | "warning"; message: string }[];
 };
 
 export type StatusResponse = {

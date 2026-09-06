@@ -452,12 +452,18 @@ impl Store {
         )
     }
 
+    pub async fn mark_relay_connected(&self, url: &str) -> Result<(), StoreError> {
+        query("INSERT INTO relay_checkpoints(relay_id,last_connected_at) SELECT id,unixepoch() FROM relays WHERE rtrim(url,'/')=rtrim(?,'/') ON CONFLICT(relay_id) DO UPDATE SET last_connected_at=unixepoch(),consecutive_failures=0,last_error=NULL,updated_at=unixepoch()")
+            .bind(url).execute(&self.pool).await?;
+        Ok(())
+    }
+
     pub async fn mark_relay_subscription(
         &self,
         url: &str,
         error: Option<&str>,
     ) -> Result<(), StoreError> {
-        query("INSERT INTO relay_checkpoints(relay_id,last_connected_at,consecutive_failures,last_error) SELECT id,CASE WHEN ? IS NULL THEN unixepoch() ELSE NULL END,CASE WHEN ? IS NULL THEN 0 ELSE 1 END,? FROM relays WHERE url=? ON CONFLICT(relay_id) DO UPDATE SET last_connected_at=coalesce(excluded.last_connected_at,relay_checkpoints.last_connected_at),consecutive_failures=CASE WHEN excluded.last_error IS NULL THEN 0 ELSE relay_checkpoints.consecutive_failures+1 END,last_error=excluded.last_error,updated_at=unixepoch()")
+        query("INSERT INTO relay_checkpoints(relay_id,last_connected_at,consecutive_failures,last_error) SELECT id,CASE WHEN ? IS NULL THEN unixepoch() ELSE NULL END,CASE WHEN ? IS NULL THEN 0 ELSE 1 END,? FROM relays WHERE rtrim(url,'/')=rtrim(?,'/') ON CONFLICT(relay_id) DO UPDATE SET last_connected_at=coalesce(relay_checkpoints.last_connected_at,excluded.last_connected_at),consecutive_failures=CASE WHEN excluded.last_error IS NULL THEN 0 ELSE relay_checkpoints.consecutive_failures+1 END,last_error=excluded.last_error,updated_at=unixepoch()")
             .bind(error).bind(error).bind(error).bind(url).execute(&self.pool).await?;
         Ok(())
     }

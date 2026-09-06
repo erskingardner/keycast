@@ -27,10 +27,14 @@ async fn connect_then_sign_round_trips_through_a_real_local_relay() {
         .execute(&pool)
         .await
         .expect("enable foreign keys");
-    raw_sql(include_str!("../../database/migrations/0001_initial.sql"))
-        .execute(&pool)
-        .await
-        .expect("apply v2 schema");
+    raw_sql(concat!(
+        include_str!("../../database/migrations/0001_initial.sql"),
+        "\n",
+        include_str!("../../database/migrations/0003_relay_reliability.sql")
+    ))
+    .execute(&pool)
+    .await
+    .expect("apply v2 schema");
     query("DELETE FROM relays")
         .execute(&pool)
         .await

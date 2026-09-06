@@ -101,7 +101,7 @@
 {:else if bunkerUri}
     <h2 class="page-header">Invitation ready</h2>
     <div class="card max-w-3xl">
-        <p class="text-amber-800">
+        <p class="text-warning">
             This bunker URL is shown once. Copy it now; Keycast stores only a
             hash of its secret.
         </p>

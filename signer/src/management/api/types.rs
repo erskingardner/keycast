@@ -70,6 +70,7 @@ pub struct CreateInvitationRequest {
 pub struct Team {
     pub id: i64,
     pub name: String,
+    pub slug: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
 }
@@ -167,6 +168,8 @@ pub struct RelayStatus {
     pub last_published_at: Option<i64>,
     pub consecutive_failures: i64,
     pub last_error: Option<String>,
+    pub diagnostics: Option<crate::relay_diagnostics::RelayDiagnostics>,
+    pub reliability: Option<crate::relay_history::RelayReliability>,
 }
 
 #[derive(Debug, Serialize)]

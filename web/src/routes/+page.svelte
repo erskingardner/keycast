@@ -1,114 +1,84 @@
 <script lang="ts">
     import SignInMenu from "$lib/components/SignInMenu.svelte";
     import { getCurrentUser } from "$lib/current_user.svelte";
-    import {
-        ArrowUpRight,
-        Key,
-        SlidersHorizontal,
-        PlugsConnected,
-    } from "phosphor-svelte";
+    import { ArrowRight } from "phosphor-svelte";
     const user = $derived(getCurrentUser()?.user);
 </script>
 
 <svelte:head
-    ><title>Keycast — Your keys, on your terms</title><meta
+    ><title>Keycast — Your keys, under your control</title><meta
         name="description"
-        content="A personal home for your Nostr keys. Manage access, connect your apps, and keep control with Keycast."
+        content="Self-hosted Nostr signing. Manage your keys, define app permissions, and control access from one workspace."
     /></svelte:head
 >
 <div class="landing">
     <div class="landing-intro eyebrow">
-        <span>Personal key infrastructure</span><span
-            >Nostr / Remote signing</span
-        >
+        <span>key management, on your terms</span><span>nostr / nip-46</span>
     </div>
     <section class="landing-hero" aria-labelledby="welcome-title">
         <div>
+            <p class="landing-prompt">
+                <span aria-hidden="true">&gt; </span>your keys, your
+                infrastructure
+            </p>
             <h1 class="landing-title" id="welcome-title">
-                Your keys.<br />Your server.<br /><span>Your terms.</span>
+                Your keys.<br /><span>Under your control.</span>
             </h1>
             <p class="landing-description">
-                One home for your Nostr keys. Connect your apps, decide what
-                they can do, and manage access from a single workspace.
+                A quiet home for your Nostr keys. Connect your apps, set their
+                permissions, and manage access on your own server.
             </p>
-            <div class="flex items-center gap-4 mt-7">
+            <div class="flex flex-wrap items-center gap-4 mt-7">
                 {#if user}<a href="/teams" class="button button-primary"
-                        >Open workspace <ArrowUpRight size={16} /></a
-                    >{:else}<SignInMenu />{/if}<span class="description"
-                    >Bring your own signer.</span
-                >
+                        >Open workspace <ArrowRight size={15} /></a
+                    >{:else}<SignInMenu />{/if}
+                <span class="description">Use your external signer.</span>
             </div>
         </div>
         <div class="overview-panel">
-            <div class="overview-title">
-                <span class="eyebrow">From key to connected app</span
-                ><ArrowUpRight size={18} />
-            </div>
-            <div class="overview-step">
-                <span class="eyebrow">01</span>
-                <div>
-                    <h2>A place for your keys</h2>
-                    <p>
-                        Organize keys into teams. Import from your trusted CLI
-                        or use the browser when you need it.
-                    </p>
+            <h2 class="overview-title">one workspace / three essentials</h2>
+            <dl>
+                <div class="overview-step">
+                    <dt>01 / keys</dt>
+                    <dd>
+                        Organize identities into teams. Import from the trusted
+                        CLI or your browser.
+                    </dd>
                 </div>
-            </div>
-            <div class="overview-step">
-                <span class="eyebrow">02</span>
-                <div>
-                    <h2>Access with clear limits</h2>
-                    <p>
-                        Choose which events an app can sign and whether it can
-                        encrypt or decrypt. Everything else is denied.
-                    </p>
+                <div class="overview-step">
+                    <dt>02 / policy</dt>
+                    <dd>
+                        Allow specific signing and encryption capabilities.
+                        Everything else is denied.
+                    </dd>
                 </div>
-            </div>
-            <div class="overview-step">
-                <span class="eyebrow">03</span>
-                <div>
-                    <h2>Connect. Review. Revoke.</h2>
-                    <p>
-                        Pair an app with a one-time invitation. Review its grant
-                        and session count, or revoke access in place.
-                    </p>
+                <div class="overview-step">
+                    <dt>03 / access</dt>
+                    <dd>
+                        Connect apps with one-time invitations. Review sessions
+                        and revoke grants in place.
+                    </dd>
                 </div>
-            </div>
-            <div class="px-5 py-3 border-t border-line flex justify-between">
-                <span class="eyebrow">Self-hosted by design</span><span
-                    class="badge">NIP-46</span
-                >
-            </div>
+            </dl>
         </div>
     </section>
-    <section class="landing-bottom" aria-label="Workspace capabilities">
+    <section class="landing-notes" aria-label="How access works">
         <article>
-            <Key size={20} weight="light" />
-            <h2>Keep the key. Share the capability.</h2>
-            <p class="description">
-                Connected apps request signatures. They do not receive the
+            <h2>keys stay with the signer</h2>
+            <p>
+                Apps request signatures through NIP-46. They do not receive the
                 managed private key.
             </p>
         </article>
         <article>
-            <SlidersHorizontal size={20} weight="light" />
-            <h2>See the whole picture.</h2>
-            <p class="description">
-                Keys, policies, members, and recent activity together. Fewer
-                pages between you and the decision.
-            </p>
-        </article>
-        <article>
-            <PlugsConnected size={20} weight="light" />
-            <h2>Use the signer you trust.</h2>
-            <p class="description">
-                Sign in with a browser extension or remote signer. Approve
-                management changes with your external key store.
+            <h2>you approve management changes</h2>
+            <p>
+                Sign in with a browser extension or remote signer. Keep
+                management approvals in your external key store.
             </p>
         </article>
     </section>
     <footer class="site-footer">
-        <span>KEYCAST</span><span>Built for a small, self-hosted instance.</span
-        >
+        <span>keycast</span><span>personal infrastructure. open protocol.</span>
     </footer>
 </div>

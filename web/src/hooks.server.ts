@@ -26,7 +26,7 @@ export const handle: Handle = async ({ event, resolve }) => {
     if (!sessionCookie && isProtectedRoute(event.url.pathname)) {
         const response = new Response(null, {
             status: 303,
-            headers: { Location: "/" },
+            headers: { Location: `/?${new URLSearchParams({ returnTo: event.url.pathname + event.url.search })}` },
         });
         applySecurityHeaders(response, event);
         return response;
