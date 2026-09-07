@@ -11,7 +11,7 @@ use nostr_sdk::prelude::{Client, ClientNotification, StreamExt};
 use thiserror::Error;
 use tokio::sync::{watch, Notify};
 
-use crate::admission::Admission;
+use crate::admission::{Admission, RelayCopies};
 use crate::control::serve_control_socket;
 use crate::protocol::{recipient, RequestProcessor, RuntimeMetrics};
 use crate::store::{Store, StoreError};
@@ -210,6 +210,7 @@ pub async fn relay_supervisor(
     let mut publishers = tokio::task::JoinSet::<(String, bool, bool)>::new();
     let mut publishing = HashSet::<String>::new();
     let mut inflight = HashMap::<String, std::time::Instant>::new();
+    let mut relay_copies = RelayCopies::default();
     let mut accepted = HashSet::<String>::new();
     let mut subscription_retries = HashMap::<String, SubscriptionRetry>::new();
     let mut subscribed_keys = BTreeSet::<PublicKey>::new();
@@ -269,13 +270,16 @@ pub async fn relay_supervisor(
                                 let event = event.into_owned();
                                 let id = event.id.to_hex();
                                 let peer = event.pubkey.to_hex();
-                                if event.kind != Kind::NostrConnect || inflight.contains_key(&id) { return Ok(true); }
+                                if event.kind != Kind::NostrConnect { return Ok(true); }
                                 let Ok(target) = recipient(&event) else { return Ok(true); };
                                 if !subscribed_keys.contains(&target) { return Ok(true); }
+                                let now = std::time::Instant::now();
+                                if relay_copies.redundant(&id, relay_url.as_str(), now) || inflight.contains_key(&id) { return Ok(true); }
                                 let Some(ticket) = admission.try_admit(&peer, &target.to_hex()) else {
                                     state.metrics.ingress_rejections.fetch_add(1,Ordering::Relaxed);
                                     return Ok(true);
                                 };
+                                relay_copies.admitted(&id, relay_url.as_str(), now);
                                 inflight.insert(id.clone(),std::time::Instant::now());
                                 let processor = processor.clone();
                                 let store = state.store.clone();
@@ -298,12 +302,13 @@ pub async fn relay_supervisor(
                     let (id,result) = match result {
                         Ok(value) => { worker_events.retain(|_, event_id| event_id != &value.0); value },
                         Err(error) => {
-                            if let Some(id) = worker_events.remove(&error.id()) { inflight.remove(&id); }
+                            if let Some(id) = worker_events.remove(&error.id()) { inflight.remove(&id); relay_copies.forget(&id); }
                             tracing::error!("request worker panicked; durable input retained for retry");
                             return Ok(true);
                         }
                     };
                     inflight.remove(&id);
+                    if result.is_err() { relay_copies.forget(&id); }
                     retry.reset_immediately();
                     match result {
                         Err(crate::protocol::ProtocolError::Capacity(response)) if publishers.len() < 16 => {
@@ -333,16 +338,13 @@ pub async fn relay_supervisor(
                     if durable { state.store.mark_published(&id,published).await?; }
                 }
                 _ = retry.tick() => {
-                    for (id,json) in state.store.outbox().await? {
+                    for (id,_) in state.store.outbox().await? {
                         if publishers.len() >= 16 { break; }
                         if !publishing.insert(id.clone()) { continue; }
                         let processor = processor.clone();
                         let client = client.clone();
                         publishers.spawn(async move {
-                            let published = match Event::from_json(json) {
-                                Ok(event) => processor.publish_response(&client,&event).await.is_ok(),
-                                Err(_) => false,
-                            };
+                            let published = processor.publish_cached_response(&client,&id).await.is_ok();
                             (id,published,true)
                         });
                     }

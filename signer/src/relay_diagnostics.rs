@@ -153,6 +153,12 @@ impl RelayDiagnostics {
 
 /// Extract only protocol-defined categories. Relay text may contain keys or echoed payloads.
 pub fn rejection_reason(message: &str) -> &'static str {
+    if message.starts_with("invalid:")
+        && message.contains("ephemeral")
+        && message.contains("expired")
+    {
+        return "Relay rejected an expired ephemeral event";
+    }
     let prefix = message
         .split_once(':')
         .map(|(prefix, _)| prefix)
@@ -164,7 +170,7 @@ pub fn rejection_reason(message: &str) -> &'static str {
         "pow" => "Relay requires proof of work",
         "payment-required" => "Relay requires payment",
         "blocked" => "Relay blocked the request",
-        "invalid" => "Relay rejected the message format",
+        "invalid" => "Relay rejected the event as invalid",
         "error" => "Relay reported an internal error",
         _ => "Relay rejected the request (unclassified reason)",
     }
@@ -185,6 +191,10 @@ mod tests {
             "Relay requires NIP-42 authentication"
         );
         assert!(!rejection_reason("nsec1secret").contains("nsec"));
+        assert_eq!(
+            rejection_reason("invalid: ephemeral event expired nsec1secret"),
+            "Relay rejected an expired ephemeral event"
+        );
         diagnostics.subscription(
             "rejected",
             Some(rejection_reason("restricted: secret")),

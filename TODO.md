@@ -5,8 +5,10 @@ The locally implementable audit hardening and expanded test suite are tracked in
 
 - [ ] Independent review of management kind 27236, signer authorization, NIP-46, envelope encryption,
   and trusted CLI backup/restore/rotation.
-- [ ] Rehearse Caddy/TLS and the exact digest-pinned stack on the target disposable VM.
+- [x] Rehearse Caddy/TLS and the exact digest-pinned stack on the target disposable VM.
+  Deployed and verified September 6, 2026; see `docs/VM_TEST_RUN_2026-09-06.md`.
 - [ ] Multi-day public-relay soak and real host power-loss/storage-fault rehearsal; local process-kill, relay and SQLite-full tests are implemented.
+- [ ] Complete the VM key-operation matrix below, including encryption/decryption rather than signing alone.
 - [ ] Select off-host backup storage and enable the provided encrypted upload/verification/retention and age-monitoring jobs.
 - [ ] Configure host/proxy connection limits and connect the provided capacity/readiness monitor to an external alert receiver.
 - [ ] Exercise management approvals with the intended external NIP-07/NIP-55/NIP-46 stores.
@@ -16,3 +18,29 @@ Implemented locally: signer-owned SQLite/ACLs, external same-key approvals, encr
 replies, bounded durable inbox/outbox, atomic logout, real subscription readiness, corrupt-grant
 isolation, first-ACK publication, trusted key import, encrypted backup/restore and root rotation.
 See `AUDIT.md`, `docs/V2_OPERATIONS.md`, and `docs/V2_VALIDATION.md` for boundaries and evidence.
+
+## VM key-operation acceptance and soak coverage
+
+Use disposable keys and the exact deployed build. Exercise Jumble's available client flows and
+use an independent NIP-46 protocol harness for operations Jumble does not expose. Record results
+per operation, policy, and recovery scenario; a successful post is not full key-operation coverage.
+
+- [ ] Verify `connect`, `get_public_key`, `ping`, and `logout`, including invitation reuse,
+  reconnects, expired/revoked sessions, and rejection of unsupported methods.
+- [ ] Exercise `sign_event` across permitted and denied event kinds; independently verify the
+  returned public key, event hash, and signature, and reject mismatched or malformed templates.
+- [ ] Exercise all four crypto methods: `nip04_encrypt`, `nip04_decrypt`, `nip44_encrypt`, and
+  `nip44_decrypt`. Verify both directions against an independent client with disposable peer keys,
+  including self-encryption, Unicode, empty input, and payload-size boundaries.
+- [ ] Check each encryption/decryption permission independently, requested session capabilities,
+  self-only versus other-recipient restrictions, and isolation between keys, grants, and teams.
+  Include malformed ciphertext, NIP-44 authentication failures, and invalid recipient keys.
+- [ ] Exercise browser and trusted CLI key import, external-signer management approvals, encrypted
+  management requests/replies, and backup/restore/root-credential rotation. Verify the same public
+  identities and permitted signing/crypto operations afterward.
+- [ ] Repeat signing and all four crypto methods during the multi-day soak and after relay loss,
+  reconnect, signer restart, VM reboot, and recovery rehearsals. Check policy edits, revocation,
+  and logout take effect while clients remain connected.
+- [ ] Report success/failure counts and latency by operation, alongside relay reliability and
+  resource growth. Store sanitized outcomes only, never private keys, plaintext messages,
+  invitation secrets, or complete bunker URLs in test logs.

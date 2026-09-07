@@ -839,6 +839,24 @@ impl Store {
         Ok(())
     }
 
+    pub(crate) async fn refresh_response_envelope(
+        &self,
+        event_id: &str,
+        response_json: &str,
+    ) -> Result<(), StoreError> {
+        query("UPDATE processed_requests SET response_event_json=? WHERE event_id=? AND response_event_json IS NOT NULL")
+            .bind(response_json).bind(event_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn response_context(
+        &self,
+        event_id: &str,
+    ) -> Result<Option<(String, String)>, StoreError> {
+        Ok(query_as("SELECT g.remote_signer_public_key,r.client_public_key FROM processed_requests r JOIN grants g ON g.id=r.grant_id WHERE r.event_id=?")
+            .bind(event_id).fetch_optional(&self.pool).await?)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub async fn record_audit(
         &self,

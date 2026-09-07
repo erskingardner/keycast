@@ -1,10 +1,70 @@
 //! Bounded admission shared by live relay input and durable-inbox recovery.
 //! A grant has one stable recipient key, so rotating client keys cannot evade its budget.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Mutex},
-    time::Instant,
+    time::{Duration, Instant},
 };
+
+/// Remember relay copies, not request payloads. A new relay's first copy of an
+/// already admitted event is redundant; another copy from the same relay may be
+/// a client retry and must still reach the durable response cache.
+#[derive(Default)]
+pub(crate) struct RelayCopies {
+    events: HashMap<String, HashSet<String>>,
+    order: VecDeque<(String, Instant)>,
+}
+impl RelayCopies {
+    const CAPACITY: usize = 4096;
+    const MAX_RELAYS: usize = 20;
+    // Coalesce fanout without blocking a retry via a different relay after a
+    // lost response. Same-relay retries are never suppressed by this cache.
+    const TTL: Duration = Duration::from_secs(2);
+
+    pub fn redundant(&mut self, id: &str, relay: &str, now: Instant) -> bool {
+        self.expire(now);
+        if let Some(relays) = self.events.get_mut(id) {
+            if !relays.contains(relay) && relays.len() < Self::MAX_RELAYS {
+                relays.insert(relay.to_owned());
+                return true;
+            }
+        }
+        false
+    }
+
+    /// Call only after admission succeeds. Dropped input must remain eligible
+    /// when another relay delivers it later.
+    pub fn admitted(&mut self, id: &str, relay: &str, now: Instant) {
+        self.expire(now);
+        if self.events.contains_key(id) {
+            return;
+        }
+        if self.events.len() == Self::CAPACITY {
+            if let Some((old, _)) = self.order.pop_front() {
+                self.events.remove(&old);
+            }
+        }
+        self.events
+            .insert(id.to_owned(), HashSet::from([relay.to_owned()]));
+        self.order.push_back((id.to_owned(), now));
+    }
+
+    fn expire(&mut self, now: Instant) {
+        while self
+            .order
+            .front()
+            .is_some_and(|(_, at)| now.duration_since(*at) >= Self::TTL)
+        {
+            let (id, _) = self.order.pop_front().unwrap();
+            self.events.remove(&id);
+        }
+    }
+
+    pub fn forget(&mut self, id: &str) {
+        self.events.remove(id);
+        self.order.retain(|(stored, _)| stored != id);
+    }
+}
 
 #[derive(Default)]
 struct Counts {
@@ -95,6 +155,46 @@ impl Drop for Ticket {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn relay_fanout_does_not_spend_the_unique_request_budget() {
+        let admission = Admission::default();
+        let mut copies = RelayCopies::default();
+        let now = Instant::now();
+        for n in 0..16 {
+            let id = format!("request-{n}");
+            assert!(!copies.redundant(&id, "first", now));
+            drop(admission.try_admit_at("client", "grant", 0).unwrap());
+            copies.admitted(&id, "first", now);
+            for relay in ["second", "third"] {
+                assert!(copies.redundant(&id, relay, now));
+            }
+        }
+        assert!(admission.try_admit_at("client", "grant", 0).is_none());
+        // Preserve client retransmissions, including failover to another relay.
+        assert!(!copies.redundant("request-0", "first", now));
+        assert!(!copies.redundant("request-0", "second", now));
+        assert!(!copies.redundant("request-0", "fourth", now + RelayCopies::TTL));
+    }
+
+    #[test]
+    fn relay_copy_cache_is_bounded_and_failed_admission_is_retryable() {
+        let now = Instant::now();
+        let mut copies = RelayCopies::default();
+        assert!(!copies.redundant("rejected", "first", now));
+        assert!(!copies.redundant("rejected", "second", now));
+        for n in 0..RelayCopies::CAPACITY + 10 {
+            copies.admitted(&format!("{n}"), "first", now);
+        }
+        assert_eq!(copies.events.len(), RelayCopies::CAPACITY);
+        assert_eq!(copies.order.len(), RelayCopies::CAPACITY);
+        assert!(!copies.redundant("0", "second", now));
+        copies.forget("10");
+        assert!(!copies.redundant("10", "second", now));
+        copies.redundant("expired", "first", now + RelayCopies::TTL);
+        assert!(copies.events.is_empty());
+        assert!(copies.order.is_empty());
+    }
 
     #[test]
     fn rotating_clients_cannot_starve_another_grant() {

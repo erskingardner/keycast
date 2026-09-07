@@ -174,6 +174,216 @@ async fn reply<S: StreamExt<Item = ClientNotification> + Unpin>(
     .await
     .expect("response through production runtime")
 }
+#[derive(Debug)]
+struct FreshEnvelopes(Arc<std::sync::atomic::AtomicUsize>);
+impl WritePolicy for FreshEnvelopes {
+    fn admit_event<'a>(
+        &'a self,
+        event: &'a Event,
+        _: &'a std::net::SocketAddr,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = WritePolicyResult> + Send + 'a>> {
+        Box::pin(async move {
+            self.0.fetch_add(1, Ordering::Relaxed);
+            if Timestamp::now()
+                .as_secs()
+                .saturating_sub(event.created_at.as_secs())
+                >= 60
+            {
+                WritePolicyResult::reject(MachineReadablePrefix::Invalid, "ephemeral event expired")
+            } else {
+                WritePolicyResult::Accept
+            }
+        })
+    }
+}
+
+#[tokio::test]
+async fn cached_reply_refreshes_its_ephemeral_envelope_without_executing_again() {
+    let publications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let relay = LocalRelay::builder()
+        .write_policy(FreshEnvelopes(publications.clone()))
+        .build();
+    relay.run().await.unwrap();
+    let f = Fixture::new(relay.url().await.as_str()).await;
+    let processor = f.processor();
+    processor.prepare_response(&f.connect()).await.unwrap();
+    let request = f.event("cached-reply", "ping", vec![]);
+    let response = processor.prepare_response(&request).await.unwrap().unwrap();
+    let old = EventBuilder::new(Kind::NostrConnect, response.content.clone())
+        .tags(response.tags.clone())
+        .custom_created_at(Timestamp::from_secs(Timestamp::now().as_secs() - 120))
+        .finalize(&f.remote)
+        .unwrap();
+    query("UPDATE processed_requests SET response_event_json=? WHERE event_id=?")
+        .bind(old.as_json())
+        .bind(request.id.to_hex())
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    let client = Client::new();
+    client.add_relay(relay.url().await).await.unwrap();
+    client.connect().and_wait(Duration::from_secs(2)).await;
+    assert!(processor.publish_response(&client, &old).await.is_err());
+    processor
+        .publish_cached_response(&client, &request.id.to_hex())
+        .await
+        .unwrap();
+    let fresh = Event::from_json(
+        f.store
+            .cached_session_response(&request.id.to_hex())
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    fresh.verify().unwrap();
+    assert_ne!(fresh.id, old.id);
+    assert!(Timestamp::now().as_secs() - fresh.created_at.as_secs() < 30);
+    assert!(
+        fresh.content == old.content,
+        "inner RPC ciphertext must remain unchanged"
+    );
+    assert_eq!(f.decrypt(&fresh)["result"], "pong");
+    let count: i64 = query_scalar("SELECT count(*) FROM audit_events WHERE request_event_id=?")
+        .bind(request.id.to_hex())
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        count, 1,
+        "refreshing delivery must not execute or audit the operation again"
+    );
+    assert_eq!(publications.load(Ordering::Relaxed), 2);
+    // A previously queued response is no longer publishable after revocation.
+    f.store
+        .revoke_grant(f.grant, &f.user.public_key().to_hex())
+        .await
+        .unwrap();
+    query("UPDATE processed_requests SET response_event_json=? WHERE event_id=?")
+        .bind(old.as_json())
+        .bind(request.id.to_hex())
+        .execute(&f.store.pool)
+        .await
+        .unwrap();
+    processor
+        .publish_cached_response(&client, &request.id.to_hex())
+        .await
+        .unwrap();
+    let retained: String =
+        query_scalar("SELECT response_event_json FROM processed_requests WHERE event_id=?")
+            .bind(request.id.to_hex())
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    assert_eq!(Event::from_json(retained).unwrap().id, old.id);
+    assert_eq!(
+        publications.load(Ordering::Relaxed),
+        2,
+        "revoked response must not reach a relay"
+    );
+    client.shutdown().await;
+    relay.shutdown();
+}
+
+#[tokio::test]
+async fn delayed_copies_from_other_relays_do_not_republish_or_consume_admission() {
+    let mut relays = Vec::new();
+    for _ in 0..3 {
+        let relay = LocalRelay::new();
+        relay.run().await.unwrap();
+        relays.push(relay);
+    }
+    let f = Fixture::new(relays[0].url().await.as_str()).await;
+    for relay in &relays[1..] {
+        query("INSERT INTO relays(url) VALUES(?)")
+            .bind(relay.url().await.as_str())
+            .execute(&f.store.pool)
+            .await
+            .unwrap();
+    }
+    f.processor().prepare_response(&f.connect()).await.unwrap();
+    let observer = Client::new();
+    for relay in &relays {
+        observer.add_relay(relay.url().await).await.unwrap();
+    }
+    let mut stream = observer.notifications();
+    observer.connect().and_wait(Duration::from_secs(2)).await;
+    observer
+        .subscribe(
+            Filter::new()
+                .kind(Kind::NostrConnect)
+                .pubkey(f.client.public_key()),
+        )
+        .await
+        .unwrap();
+    let state = RuntimeState::new(f.store.clone());
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(relay_supervisor(state.clone(), rx));
+    ready(&state).await;
+    let first = observer
+        .relay(relays[0].url().await)
+        .await
+        .unwrap()
+        .unwrap();
+    let request = f.event("relay-copies", "ping", vec![]);
+    first.send_event(&request).await.unwrap();
+    assert_eq!(
+        reply(&mut stream, "relay-copies", &f).await["result"],
+        "pong"
+    );
+    tokio::time::timeout(Duration::from_secs(3), async {
+        loop {
+            let status: String =
+                query_scalar("SELECT status FROM processed_requests WHERE event_id=?")
+                    .bind(request.id.to_hex())
+                    .fetch_one(&f.store.pool)
+                    .await
+                    .unwrap();
+            if status == "completed" {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let before: i64 =
+        query_scalar("SELECT publish_attempts FROM processed_requests WHERE event_id=?")
+            .bind(request.id.to_hex())
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    // Other relays deliver the same signed event after the first response was ACKed.
+    for relay in &relays[1..] {
+        observer
+            .relay(relay.url().await)
+            .await
+            .unwrap()
+            .unwrap()
+            .send_event(&request)
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+    }
+    let after: i64 =
+        query_scalar("SELECT publish_attempts FROM processed_requests WHERE event_id=?")
+            .bind(request.id.to_hex())
+            .fetch_one(&f.store.pool)
+            .await
+            .unwrap();
+    stop.send(true).unwrap();
+    task.await.unwrap().unwrap();
+    observer.shutdown().await;
+    for relay in relays {
+        relay.shutdown();
+    }
+    assert_eq!(
+        after, before,
+        "redundant relay copies must not restart response publication"
+    );
+    assert_eq!(state.metrics.ingress_rejections.load(Ordering::Relaxed), 0);
+}
+
 #[tokio::test]
 async fn runtime_handles_duplicate_delivery_and_durable_restart_outbox() {
     let relay = LocalRelay::new();

@@ -135,8 +135,11 @@ impl RequestProcessor {
             }
             result => result?,
         };
-        if let Some(response) = response {
-            let published = self.publish_response(client, &response).await.is_ok();
+        if response.is_some() {
+            let published = self
+                .publish_cached_response(client, &event.id.to_hex())
+                .await
+                .is_ok();
             self.store
                 .mark_published(&event.id.to_hex(), published)
                 .await?;
@@ -533,6 +536,52 @@ impl RequestProcessor {
             tasks.abort_all();
             while tasks.join_next().await.is_some() {}
         }
+    }
+
+    /// NIP-46 envelopes are ephemeral events. Refresh an old envelope before
+    /// retrying it; the encrypted RPC result stays identical and the requested
+    /// key operation is never executed again. Recheck authority before release.
+    pub async fn publish_cached_response(
+        &self,
+        client: &Client,
+        request_event_id: &str,
+    ) -> Result<(), ProtocolError> {
+        let response = {
+            let _authority = self.store.authority.lock().await;
+            let Some(json) = self.store.cached_session_response(request_event_id).await? else {
+                return Ok(());
+            };
+            let mut response = Event::from_json(json).map_err(|_| ProtocolError::Response)?;
+            let Some((remote, peer)) = self.store.response_context(request_event_id).await? else {
+                return Ok(());
+            };
+            if response.kind != Kind::NostrConnect
+                || response.pubkey.to_hex() != remote
+                || recipient(&response)?.to_hex() != peer
+            {
+                return Err(ProtocolError::Response);
+            }
+            let Some(grant) = self.store.grant_for_recipient(&remote).await? else {
+                return Ok(());
+            };
+            if Timestamp::now()
+                .as_secs()
+                .saturating_sub(response.created_at.as_secs())
+                >= 30
+            {
+                response.verify().map_err(|_| ProtocolError::Response)?;
+                let remote_keys = self.store.decrypt_remote_keys(&grant)?;
+                response = EventBuilder::new(Kind::NostrConnect, response.content)
+                    .tags(response.tags)
+                    .finalize(&remote_keys)
+                    .map_err(|_| ProtocolError::Response)?;
+                self.store
+                    .refresh_response_envelope(request_event_id, &response.as_json())
+                    .await?;
+            }
+            response
+        };
+        self.publish_response(client, &response).await
     }
 
     /// Network waits never hold the authority lock. The durable outbox owns retries.
