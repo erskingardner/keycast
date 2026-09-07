@@ -4,6 +4,11 @@ The test instance is live at https://keycast.ipf.dev on `91.98.92.28` (Debian 13
 approximately 2 GB RAM). This records initial deployment and protocol evidence,
 not completion of the acceptance matrix or approval for real private keys.
 
+**Current run:** the original soak was stopped early for fixes. A fresh 24-hour
+run started September 7 at 08:55:38 UTC and ends September 8 at 08:55:38 UTC
+(10:55 Europe/Rome). The completion review is scheduled for 11:06 Europe/Rome.
+The historical deployment and original-run evidence below are retained for comparison.
+
 ## Build provenance
 
 Source: `f1a487cb1e66c47a5967d397bdc0b89a4310fdc3` on master.
@@ -161,6 +166,47 @@ It requires `KEYCAST_TEST_API`, `KEYCAST_TEST_SOURCE`, and existing disposable
 `/secrets/keys.json` and `/secrets/state.json` fixtures inside the web container.
 The test matrix and 30-second operation deadlines are retained. A fresh 24-hour
 run will use separate results after the corrected build passes deployment gates.
+
+### Corrected deployment and 24-hour restart
+
+Runtime source `d4df4fe660d03e66c6abefa2804eecff71dd1f36` was deployed after CI
+`34102271610` and Docker Images `34102271609` passed, including all three image
+builds and the combined read-only-container smoke. Both Compose files rendered
+successfully. Local Rust/web/security/operations checks passed. An additional
+local run completed 1,000 requests and three process restarts without failures,
+with zero pending work (17.7 ms median and 21.9 ms p95 on local relays).
+
+Corrected immutable image digests:
+
+- API: `sha256:1c8477f4ac292d34ac06210e6e7d3b3e03936551b40511b232be69180c4e870a`
+- Signer: `sha256:d07b99a42dc4a9e5ee612721e62ab9ffcde1c729a95adffe786ff1ee848a7c0d`
+- Web: `sha256:7b7511ec3342ac9730184eb09514e3fab9e86bcf43b9fadc9d2b723972c69c20`
+
+The image repositories and Caddy digest remain as listed above. HTTPS and all
+application health checks passed after deployment. Twenty consecutive public-relay
+runs passed 240 operation checks with zero admission rejections and no increase
+in signer-side relay error counters. Their detailed results are retained in
+`/opt/keycast-test/archive/preflight-after-fix.jsonl`. This batch alone does not
+establish that all intermittent failures are eliminated.
+
+The harness now drains outstanding relay acknowledgments before closing the
+client, rather than counting its own connection teardown as a relay error. This
+adds a thirteenth check to the existing twelve checks. Any forced cleanup during
+a failed run is classified separately as `client_closed`. The first actual new
+soak run passed all 13 checks with zero ingress or client publication failures.
+
+The new VM timer runs every five minutes, ends after 24 hours, and leaves the
+application stack running. Its deadline termination was exercised successfully
+before starting the new run. The runner records the runtime source and harness
+hash on every run. Current script hashes:
+
+- Harness: `d257e281e4739cce12ff1844aaa4baa04eed66995d48a444d04f5deb88ebec83`
+- Runner: `453caedfc34f8f34d63ed18d7dc20c61d67277a7a603bccb7b7c221213b6e370`
+
+`/opt/keycast-test/soak-started` and `soak-until` are authoritative for the new
+window. The old completion reminder has been replaced with a one-time review on
+September 8 at 11:06 Europe/Rome, comparing the new results against the original
+run. The acceptance and recovery items below remain open.
 
 Jumble browser flows have not been tested. The full matrix in `TODO.md` remains
 open: logout/invitation reuse/expiry, individual crypto permission and recipient

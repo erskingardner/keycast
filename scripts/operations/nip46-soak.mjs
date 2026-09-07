@@ -40,13 +40,14 @@ function relayReason(error) {
  return 'other';
 }
 let signer; let phase='bootstrap'; let failures=0;
-const results=[], publications=[]; let before, after, failure;
+const results=[], publications=[], publicationWaits=[]; let closing=false; let before, after, failure;
 function instrument(signer) {
  let activeMethod; const send=signer.sendRequest.bind(signer), publish=signer.pool.publish.bind(signer.pool);
  signer.sendRequest=(method,params)=>{activeMethod=method; return send(method,params);};
  signer.pool.publish=(relays,event,...args)=>{
   const method=activeMethod;
-  return publish(relays,event,...args).map((promise,i)=>promise.then(value=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:true});return value;},error=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:false,reason:relayReason(error)});throw error;}));
+  const promises=publish(relays,event,...args).map((promise,i)=>promise.then(value=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:true});return value;},error=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:false,reason:closing?'client_closed':relayReason(error)});throw error;}));
+  publicationWaits.push(...promises); return promises;
  };
 }
 async function step(name,fn) {
@@ -87,14 +88,15 @@ try {
  await step('reject_invalid_ciphertext',()=>denied(()=>signer.nip44Decrypt(peer,'invalid ciphertext'),/cryptographic operation failed/));
  await step('reject_invalid_recipient',()=>denied(()=>signer.nip04Encrypt('bad-key',message),/invalid public key/));
  await step('reject_unknown_method',()=>denied(()=>signer.sendRequest('unsupported_method',[]),/unsupported|unknown|not supported/));
- await signer.close(); signer.pool.destroy();
+ await step('relay_acknowledgments',()=>Promise.allSettled(publicationWaits));
+ closing=true; await signer.close(); signer.pool.destroy();
  after=await status();
  assert(after.ready && after.integrity_ok, 'Signer must remain ready with valid integrity');
 } catch(error) {
  failures++; failure={phase,error_class:errorClass(error)};
  try {after=await status();} catch {}
 } finally {
- if(signer){await signer.close();signer.pool.destroy();}
+ closing=true; if(signer){await signer.close();signer.pool.destroy();}
  for(const key of Object.values(keys)) key.fill(0);
  const summary={at:new Date().toISOString(),source,result:failures?'FAIL':'PASS',failure,results,publications,before,after};
  writeFileSync('/results/latest.json',JSON.stringify(summary,null,2),{mode:0o600});
