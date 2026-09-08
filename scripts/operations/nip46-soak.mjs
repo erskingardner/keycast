@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import {readFileSync,writeFileSync} from 'node:fs';
+import diagnostics from 'node:diagnostics_channel';
+import {readFileSync,writeFileSync,existsSync} from 'node:fs';
 import {getPublicKey,finalizeEvent,verifyEvent} from 'nostr-tools/pure';
 import {v2 as nip44} from 'nostr-tools/nip44';
 import * as nip04 from 'nostr-tools/nip04';
@@ -15,6 +16,14 @@ const admin=getPublicKey(keys.admin), managed=getPublicKey(keys.managed), peer=g
 
 console.debug=()=>{}; console.warn=()=>{};
 const now=()=>Math.floor(Date.now()/1000);
+// Node's WebSocket error hides failed upgrade statuses. Retain only HTTP status
+// and time by public relay origin, never headers or request/response bodies.
+const upgradeErrors=new Map();
+diagnostics.channel('undici:request:headers').subscribe(({request,response})=>{
+ if(response.statusCode>=400 && String(request.origin).startsWith('https://')) {
+  upgradeErrors.set(new URL(request.origin).host,{status:response.statusCode,at:performance.now()});
+ }
+});
 async function status() {
  const config=await fetch(`${base}/config?pubkey=${admin}`,{signal:AbortSignal.timeout(10000)}).then(r=>r.json());
  const event=finalizeEvent({kind:27237,created_at:now(),tags:[['u',base+'/status'],['method','GET'],['instance',config.instance_id]],content:''},keys.admin);
@@ -46,7 +55,7 @@ function instrument(signer) {
  signer.sendRequest=(method,params)=>{activeMethod=method; return send(method,params);};
  signer.pool.publish=(relays,event,...args)=>{
   const method=activeMethod; const started=performance.now();
-  const promises=publish(relays,event,...args).map((promise,i)=>promise.then(value=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:true,ms:Math.round(performance.now()-started)});return value;},error=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:false,reason:closing?'client_closed':relayReason(error),phase:String(error).includes('connection failure:')?'connect':'publish',ms:Math.round(performance.now()-started)});throw error;}));
+  const promises=publish(relays,event,...args).map((promise,i)=>promise.then(value=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:true,ms:Math.round(performance.now()-started)});return value;},error=>{const upgrade=upgradeErrors.get(new URL(relays[i]).host);const http_status=upgrade?.at>=started?upgrade.status:undefined;publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:false,reason:closing?'client_closed':http_status===503?'service_unavailable':relayReason(error),phase:String(error).includes('connection failure:')?'connect':'publish',http_status,ms:Math.round(performance.now()-started)});throw error;}));
   publicationWaits.push(...promises); return promises;
  };
 }
@@ -91,6 +100,29 @@ try {
  await step('reject_unknown_method',()=>denied(()=>signer.sendRequest('unsupported_method',[]),/unsupported|unknown|not supported/));
  await step('relay_acknowledgments',()=>Promise.allSettled(publicationWaits));
  closing=true; await signer.close(); signer.pool.destroy();
+ // A separate fixture exercises automatically discovered destinations only,
+ // so baseline availability cannot hide a broken discovered-relay connection.
+ if(existsSync('/secrets/discovery-state.json')) {
+  const discovered=JSON.parse(readFileSync('/secrets/discovery-state.json','utf8'));
+  const pointer=await parseBunkerInput(discovered.bunker); assert(pointer);
+  const client=Uint8Array.from(Buffer.from(discovered.client,'hex'));
+  assert(Array.isArray(discovered.relays)&&discovered.relays.length>0&&discovered.relays.every(r=>pointer.relays.includes(r)));
+  signer=BunkerSigner.fromBunker(client,{...pointer,relays:discovered.relays});
+  instrument(signer); closing=false;
+  await step('discovered_relay_ping',()=>signer.ping());
+  await step('discovered_relay_sign',async()=>{const event=await signer.signEvent({kind:1,created_at:now(),tags:[],content:'Disposable discovered-relay test; not published.'});assert(verifyEvent(event));assert.equal(event.pubkey,discovered.pub);});
+  await step('discovered_relay_nip04',async()=>{
+   assert.equal(await nip04.decrypt(keys.peer,discovered.pub,await signer.nip04Encrypt(peer,message)),message);
+   assert.equal(await signer.nip04Decrypt(peer,await nip04.encrypt(keys.peer,discovered.pub,message)),message);
+  });
+  await step('discovered_relay_nip44',async()=>{
+   const conv=nip44.utils.getConversationKey(keys.peer,discovered.pub);
+   assert.equal(nip44.decrypt(await signer.nip44Encrypt(peer,message),conv),message);
+   assert.equal(await signer.nip44Decrypt(peer,nip44.encrypt(message,conv)),message);
+  });
+  await step('discovered_relay_acknowledgments',()=>Promise.allSettled(publicationWaits));
+  closing=true; await signer.close(); signer.pool.destroy();client.fill(0);
+ }
  after=await status();
  assert(after.ready && after.integrity_ok, 'Signer must remain ready with valid integrity');
 } catch(error) {

@@ -15,7 +15,8 @@ The locally implementable audit hardening and expanded test suite are tracked in
 - [x] Add cached NIP-65 discovery on import with operator-controlled activation, network-destination
   restrictions and per-key routing. Protocol relay switching is tested; Jumble automatic
   adoption remains a client compatibility limitation (keep baseline routes available). Investigation and proposed
-  ordering: `docs/RELAY_INVESTIGATION_2026-09-08.md`.
+  ordering: `docs/RELAY_INVESTIGATION_2026-09-08.md`. VM rollout and the new scoped-relay
+  workload: `docs/RELAY_ROLLOUT_2026-09-08.md`.
 - [ ] Complete the VM key-operation matrix below, including encryption/decryption rather than signing alone.
 - [ ] Select off-host backup storage and enable the provided encrypted upload/verification/retention and age-monitoring jobs.
 - [ ] Configure host/proxy connection limits and connect the provided capacity/readiness monitor to an external alert receiver.
