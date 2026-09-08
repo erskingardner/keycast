@@ -45,7 +45,6 @@ export type NostrConnectSigninOptions = {
 const PROFILE_LOAD_TIMEOUT_MS = 5000;
 const CONTACTS_LOAD_TIMEOUT_MS = 5000;
 export const DEFAULT_NOSTR_CONNECT_RELAYS = [
-    "wss://relay.nsec.app",
     ...REQUIRED_PUBLIC_RELAYS,
 ] as const;
 

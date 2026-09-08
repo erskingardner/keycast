@@ -30,7 +30,9 @@ async fn connect_then_sign_round_trips_through_a_real_local_relay() {
     raw_sql(concat!(
         include_str!("../../database/migrations/0001_initial.sql"),
         "\n",
-        include_str!("../../database/migrations/0003_relay_reliability.sql")
+        include_str!("../../database/migrations/0003_relay_reliability.sql"),
+        "\n",
+        include_str!("../../database/migrations/0004_key_relay_discovery.sql")
     ))
     .execute(&pool)
     .await

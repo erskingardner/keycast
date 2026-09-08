@@ -78,11 +78,6 @@ impl Counts {
         *self.clients.entry(client.to_owned()).or_default() += 1;
         *self.grants.entry(grant.to_owned()).or_default() += 1;
     }
-    fn full(&self, client: &str, grant: &str, limits: (usize, usize, usize)) -> bool {
-        self.total >= limits.0
-            || self.clients.get(client).copied().unwrap_or(0) >= limits.1
-            || self.grants.get(grant).copied().unwrap_or(0) >= limits.2
-    }
 }
 #[derive(Default)]
 struct State {
@@ -105,23 +100,55 @@ impl Default for Admission {
 }
 impl Admission {
     pub fn try_admit(&self, client: &str, grant: &str) -> Option<Ticket> {
-        self.try_admit_at(client, grant, self.start.elapsed().as_secs())
+        self.try_admit_reason(client, grant).ok()
     }
+    pub fn try_admit_reason(&self, client: &str, grant: &str) -> Result<Ticket, &'static str> {
+        self.admit_at(client, grant, self.start.elapsed().as_secs())
+    }
+    #[cfg(test)]
     fn try_admit_at(&self, client: &str, grant: &str, second: u64) -> Option<Ticket> {
+        self.admit_at(client, grant, second).ok()
+    }
+    fn admit_at(&self, client: &str, grant: &str, second: u64) -> Result<Ticket, &'static str> {
         let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
         if second != state.second {
             state.second = second;
             state.rate = Counts::default();
         }
         // Limits also bound map cardinality; rejected identities are never inserted.
-        if state.running.full(client, grant, (32, 2, 8))
-            || state.rate.full(client, grant, (128, 16, 32))
-        {
-            return None;
+        for (counts, limits, reasons) in [
+            (
+                &state.running,
+                (32, 2, 8),
+                [
+                    "admission_running_global",
+                    "admission_running_client",
+                    "admission_running_grant",
+                ],
+            ),
+            (
+                &state.rate,
+                (128, 16, 32),
+                [
+                    "admission_rate_global",
+                    "admission_rate_client",
+                    "admission_rate_grant",
+                ],
+            ),
+        ] {
+            if counts.total >= limits.0 {
+                return Err(reasons[0]);
+            }
+            if counts.clients.get(client).copied().unwrap_or(0) >= limits.1 {
+                return Err(reasons[1]);
+            }
+            if counts.grants.get(grant).copied().unwrap_or(0) >= limits.2 {
+                return Err(reasons[2]);
+            }
         }
         state.running.increment(client, grant);
         state.rate.increment(client, grant);
-        Some(Ticket {
+        Ok(Ticket {
             state: self.state.clone(),
             client: client.to_owned(),
             grant: grant.to_owned(),

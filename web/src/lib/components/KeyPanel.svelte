@@ -11,6 +11,7 @@
         Grant,
         InvitationCreationResponse,
         KeyWithRelations,
+        KeyRelayInfo,
         StoredKey,
         Team,
     } from "$lib/types";
@@ -30,6 +31,7 @@
     let team: Team | null = $state(null);
     let key: StoredKey | null = $state(null);
     let grants: Grant[] = $state([]);
+    let relayDiscovery: KeyRelayInfo | null = $state(null);
     let invitationUri: string | null = $state(null);
     let loadError: string | null = $state(null);
 
@@ -55,6 +57,7 @@
                 key = response.stored_key;
                 team = response.team;
                 grants = response.grants;
+                relayDiscovery = response.relay_discovery;
             })
             .catch((error) => {
                 loadError =
@@ -217,6 +220,29 @@
             >Remove key</button
         >
     </div>
+    {#if relayDiscovery}
+        <section class="border-t border-border py-4 mb-4">
+            <div class="flex items-center justify-between gap-3 mb-2">
+                <h3 class="font-mono text-sm">Relays from this key</h3>
+                <button class="button button-secondary" onclick={load}>Refresh</button>
+            </div>
+            <p class="text-muted text-sm mb-3">
+                NIP-65 · {relayDiscovery.status}
+                {#if relayDiscovery.fetched_at} · checked {new Date(relayDiscovery.fetched_at * 1000).toLocaleString()}{/if}
+            </p>
+            {#each relayDiscovery.relays as relay (relay.url)}
+                <div class="flex flex-wrap justify-between gap-2 border-t border-border py-2 text-sm">
+                    <span class="font-mono break-all">{relay.url}</span>
+                    <span class="text-muted">{relay.read ? "read" : ""}{relay.read && relay.write ? " / " : ""}{relay.write ? "write" : ""} · {relay.active ? "signer active" : relay.status}{!relay.listed ? " · retiring" : ""}</span>
+                </div>
+            {:else}
+                <p class="text-muted text-sm">{relayDiscovery.status === "pending" ? "Looking for this key’s relay list in the background." : "No usable relay list found. Your configured signing relays remain available."}</p>
+            {/each}
+            {#if !relayDiscovery.auto_activate}
+                <p class="text-muted text-sm mt-3">Automatic activation is off. An instance operator can enable it in Instance status.</p>
+            {/if}
+        </section>
+    {/if}
     {#if invitationUri}
         <div class="invitation">
             <h3 class="text-sm font-semibold mb-2">Copy this invitation now</h3>

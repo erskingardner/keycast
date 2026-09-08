@@ -11,7 +11,7 @@ const DEAD_RELAYS = [
 const REQUIRED_RELAYS = [
     "wss://nos.lol",
     "wss://relay.primal.net",
-    "wss://relay.ditto.pub",
+    "wss://bucket.coracle.social",
 ] as const;
 
 describe("relay defaults", () => {

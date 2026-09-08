@@ -71,7 +71,13 @@ export type Grant = {
     invitations: { id: number; expires_at: number }[];
 };
 
+export type KeyRelayInfo = {
+    event_id: string | null; created_at: number | null; fetched_at: number | null;
+    status: string; auto_activate: boolean;
+    relays: { url: string; read: boolean; write: boolean; listed: boolean; status: string; verified_at: number | null; active: boolean }[];
+};
 export type KeyWithRelations = {
+    relay_discovery: KeyRelayInfo;
     team: Team;
     stored_key: StoredKey;
     grants: Grant[];
@@ -104,12 +110,17 @@ export type SignerStatus = {
     connected_relays: number;
     last_processed_at: number | null;
     ingress_rejections: number;
+    cached_retries: number;
+    retry_coalesced: number;
+    retry_throttled: number;
+    storage_rejections: number;
     parse_errors: number;
     denied_requests: number;
     relay_failures: number;
 };
 
 export type RelayStatus = {
+    discovered: boolean;
     id: number;
     url: string;
     enabled: boolean;
@@ -160,6 +171,7 @@ export type RelayDiagnostics = {
 export type StatusResponse = {
     signer: SignerStatus;
     database_ok: boolean;
+    auto_activate_relays: boolean;
     minimum_connected_relays: number;
     relays: RelayStatus[];
 };

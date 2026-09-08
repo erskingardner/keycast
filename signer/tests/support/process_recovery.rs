@@ -50,6 +50,17 @@ async fn daemon_status(
     .flatten()
 }
 async fn daemon_ready(directory: &std::path::Path, daemon: &mut Daemon) {
+    // macOS can hold a newly linked executable at _dyld_start before Rust main
+    // runs. Allow that cold launch separately; retain the normal readiness
+    // deadline once the daemon can serve a status request.
+    #[cfg(target_os = "macos")]
+    tokio::time::timeout(Duration::from_secs(90), async {
+        loop {
+            assert!(daemon.0.try_wait().unwrap().is_none(), "daemon exited during launch");
+            if daemon_status(directory).await.is_some() { break; }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }).await.expect("daemon cold launch");
     tokio::time::timeout(Duration::from_secs(15), async {
         loop {
             assert!(

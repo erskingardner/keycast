@@ -13,7 +13,7 @@ use tokio::sync::{watch, Notify};
 
 use crate::admission::{Admission, RelayCopies};
 use crate::control::serve_control_socket;
-use crate::protocol::{recipient, RequestProcessor, RuntimeMetrics};
+use crate::protocol::{recipient, validate_outer_event, RequestProcessor, RuntimeMetrics};
 use crate::store::{Store, StoreError};
 
 #[derive(Clone)]
@@ -83,6 +83,10 @@ impl RuntimeState {
             connected_relays: self.connected_relays.load(Ordering::Relaxed),
             last_processed_at,
             ingress_rejections: self.metrics.ingress_rejections.load(Ordering::Relaxed),
+            cached_retries: self.metrics.cached_retries.load(Ordering::Relaxed),
+            retry_coalesced: self.metrics.retry_coalesced.load(Ordering::Relaxed),
+            retry_throttled: self.metrics.retry_throttled.load(Ordering::Relaxed),
+            storage_rejections: self.metrics.storage_rejections.load(Ordering::Relaxed),
             parse_errors: self.metrics.parse_errors.load(Ordering::Relaxed),
             denied_requests: self.metrics.denied_requests.load(Ordering::Relaxed),
             relay_failures: self.metrics.relay_failures.load(Ordering::Relaxed),
@@ -196,7 +200,7 @@ pub async fn relay_supervisor(
     mut shutdown: watch::Receiver<bool>,
 ) -> Result<(), StoreError> {
     use nostr::prelude::{Event, RelayMessage, SubscriptionId};
-    use std::collections::{BTreeSet, HashMap, HashSet};
+    use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
     let telemetry = crate::relay_transport::RelayTelemetry::default();
     let client = Client::builder()
         .websocket_transport(crate::relay_transport::ObservedTransport(telemetry.clone()))
@@ -211,9 +215,17 @@ pub async fn relay_supervisor(
     let mut publishing = HashSet::<String>::new();
     let mut inflight = HashMap::<String, std::time::Instant>::new();
     let mut relay_copies = RelayCopies::default();
+    // IDs only, bounded by the durable inbox's 10,000-record limit. Rebuilt after restart.
+    let mut completed = HashSet::<String>::new();
+    let mut replay_queue = crate::replay::ReplayQueue::default();
+    let mut replay_publishers = tokio::task::JoinSet::<String>::new();
     let mut accepted = HashSet::<String>::new();
     let mut subscription_retries = HashMap::<String, SubscriptionRetry>::new();
     let mut subscribed_keys = BTreeSet::<PublicKey>::new();
+    let mut relay_keys = BTreeMap::<String, BTreeSet<PublicKey>>::new();
+    let mut baseline = BTreeSet::<String>::new();
+    let mut discovery_tick = tokio::time::interval(Duration::from_secs(10));
+    let mut discovery_jobs = tokio::task::JoinSet::new();
     let mut subscription = SubscriptionId::generate();
     let mut refresh = tokio::time::interval(Duration::from_secs(10));
     let mut retry = tokio::time::interval(Duration::from_millis(100));
@@ -221,6 +233,7 @@ pub async fn relay_supervisor(
     let mut maintenance = tokio::time::interval(Duration::from_secs(60));
     let mut integrity = tokio::time::interval(Duration::from_secs(3600));
     let admission = Admission::default();
+    let replay_validation = Admission::default();
     let mut minimum = 1i64;
     let mut recovery_pending = false;
     let mut delivery_failure: Option<std::time::Instant> = None;
@@ -272,12 +285,35 @@ pub async fn relay_supervisor(
                                 let peer = event.pubkey.to_hex();
                                 if event.kind != Kind::NostrConnect { return Ok(true); }
                                 let Ok(target) = recipient(&event) else { return Ok(true); };
-                                if !subscribed_keys.contains(&target) { return Ok(true); }
+                                if !relay_keys.get(relay_url.as_str().trim_end_matches('/')).is_some_and(|keys|keys.contains(&target)) { return Ok(true); }
                                 let now = std::time::Instant::now();
                                 if relay_copies.redundant(&id, relay_url.as_str(), now) || inflight.contains_key(&id) { return Ok(true); }
-                                let Some(ticket) = admission.try_admit(&peer, &target.to_hex()) else {
-                                    state.metrics.ingress_rejections.fetch_add(1,Ordering::Relaxed);
+                                if completed.contains(&id) {
+                                    // Bound signature verification itself, including invalid copies
+                                    // carrying a known ID. This budget is separate from fresh work.
+                                    let Some(_verification)=replay_validation.try_admit(&peer,&target.to_hex()) else {
+                                        state.metrics.retry_throttled.fetch_add(1,Ordering::Relaxed);
+                                        telemetry.record(relay_url.as_str(),"retry_throttled");
+                                        return Ok(true);
+                                    };
+                                    if validate_outer_event(&event).is_err() { return Ok(true); }
+                                    let category = replay_queue.enqueue(id, peer, target.to_hex(), now);
+                                    let metric = match category {
+                                        "cached_retry" => &state.metrics.cached_retries,
+                                        "retry_coalesced" => &state.metrics.retry_coalesced,
+                                        _ => &state.metrics.retry_throttled,
+                                    };
+                                    metric.fetch_add(1, Ordering::Relaxed);
+                                    telemetry.record(relay_url.as_str(), category);
                                     return Ok(true);
+                                }
+                                let ticket = match admission.try_admit_reason(&peer, &target.to_hex()) {
+                                    Ok(ticket) => ticket,
+                                    Err(reason) => {
+                                        state.metrics.ingress_rejections.fetch_add(1,Ordering::Relaxed);
+                                        telemetry.record(relay_url.as_str(), reason);
+                                        return Ok(true);
+                                    }
                                 };
                                 relay_copies.admitted(&id, relay_url.as_str(), now);
                                 inflight.insert(id.clone(),std::time::Instant::now());
@@ -309,6 +345,7 @@ pub async fn relay_supervisor(
                     };
                     inflight.remove(&id);
                     if result.is_err() { relay_copies.forget(&id); }
+                    if matches!(&result, Ok(Some(_))) && completed.len() < 10000 { completed.insert(id.clone()); }
                     retry.reset_immediately();
                     match result {
                         Err(crate::protocol::ProtocolError::Capacity(response)) if publishers.len() < 16 => {
@@ -337,7 +374,21 @@ pub async fn relay_supervisor(
                     else { delivery_failure = Some(std::time::Instant::now()); }
                     if durable { state.store.mark_published(&id,published).await?; }
                 }
+                Some(result) = replay_publishers.join_next(), if !replay_publishers.is_empty() => {
+                    if let Ok(id) = result { replay_queue.finish(&id); }
+                    else { replay_queue.clear(); }
+                }
                 _ = retry.tick() => {
+                    while replay_publishers.len() < 2 {
+                        let Some(id) = replay_queue.pop(std::time::Instant::now()) else { break; };
+                        let processor = processor.clone();
+                        let client = client.clone();
+                        replay_publishers.spawn(async move {
+                            // Rechecks the durable session and grant. Never executes a key operation.
+                            let _ = processor.publish_cached_response(&client, &id).await;
+                            id
+                        });
+                    }
                     for (id,_) in state.store.outbox().await? {
                         if publishers.len() >= 16 { break; }
                         if !publishing.insert(id.clone()) { continue; }
@@ -354,17 +405,28 @@ pub async fn relay_supervisor(
                         return Err(StoreError::InvalidInput("request worker progress stalled".into()));
                     }
                     (minimum,recovery_pending) = sqlx::query_as::query_as("SELECT minimum_connected_relays,recovery_pending FROM instance_settings WHERE singleton=1").fetch_one(&state.store.pool).await?;
+                    completed = sqlx::query_scalar::query_scalar::<_, String>("SELECT event_id FROM processed_requests WHERE response_event_json IS NOT NULL ORDER BY received_at DESC LIMIT 10000")
+                        .fetch_all(&state.store.pool).await?.into_iter().collect();
                     let grants = state.store.active_grants().await?;
                     let mut public_keys = BTreeSet::new();
+                    let mut desired_keys = BTreeMap::<String,BTreeSet<PublicKey>>::new();
+                    baseline=state.store.enabled_relays().await?.into_iter().map(|u|u.trim_end_matches('/').to_owned()).collect();
+                    let scopes: Vec<(i64,String)> = sqlx::query_as::query_as("SELECT k.stored_key_id,r.url FROM key_relays k JOIN relays r ON r.id=k.relay_id WHERE r.enabled=1 AND (k.retire_at IS NULL OR k.retire_at>unixepoch())").fetch_all(&state.store.pool).await?;
                     let mut quarantined = 0;
                     for grant in &grants {
                         match state.store.validate_runtime_grant(grant) {
-                            Ok(()) => { if let Ok(key) = PublicKey::from_hex(&grant.remote_signer_public_key) { public_keys.insert(key); } }
+                            Ok(()) => { if let Ok(key) = PublicKey::from_hex(&grant.remote_signer_public_key) {
+                                public_keys.insert(key);
+                                for url in baseline.iter().cloned().chain(scopes.iter().filter(|(id,_)|*id==grant.stored_key_id).map(|(_,url)|url.trim_end_matches('/').to_owned())) {
+                                    desired_keys.entry(url).or_default().insert(key);
+                                }
+                            } }
                             Err(_) => { quarantined += 1; tracing::warn!(grant_id=grant.id,"grant quarantined: invalid policy or key envelope"); }
                         }
                     }
                     state.quarantined_grants.store(quarantined,Ordering::Relaxed);
-                    let desired = state.store.enabled_relays().await?;
+                    let desired = state.store.active_transport_relays().await?;
+                    telemetry.restrict(desired.iter().filter(|u| !baseline.contains(u.trim_end_matches('/'))).cloned().collect());
                     telemetry.configure(&desired);
                     let mut changed = false;
                     for (url,_) in client.relays().await {
@@ -393,27 +455,22 @@ pub async fn relay_supervisor(
                     subscription_retries.retain(|url,_| relays.keys().any(|u|u.as_str()==url));
                     let connected = relays.values().filter(|r| r.status().is_connected()).count();
                     state.connected_relays.store(connected,Ordering::Relaxed);
-                    if public_keys != subscribed_keys || changed {
+                    if desired_keys != relay_keys || changed {
                         let _ = client.unsubscribe(&subscription).await;
                         subscription = SubscriptionId::generate();
                         accepted.clear();
                         subscription_retries.clear();
                         subscribed_keys = public_keys;
-                        if !subscribed_keys.is_empty() {
-                            let filter = Filter::new().pubkeys(subscribed_keys.iter().copied()).kind(Kind::NostrConnect)
-                                .since(Timestamp::from_secs(Timestamp::now().as_secs().saturating_sub(300)));
-                            if client.subscribe(filter).with_id(subscription.clone()).await.is_err() {
-                                state.metrics.relay_failures.fetch_add(1,Ordering::Relaxed);
-                            }
-                        }
+                        relay_keys=desired_keys;
                     }
                     if !subscribed_keys.is_empty() {
                         for (url,relay) in client.relays().await {
-                            if relay.status().is_connected() && !accepted.contains(url.as_str()) {
-                                let retry = subscription_retries.entry(url.to_string()).or_default();
+                            if !accepted.contains(url.as_str()) {
+                                let retry = subscription_retries.entry(url.to_string()).or_insert_with(|| SubscriptionRetry { next: std::time::Instant::now(), attempts:0 });
                                 if !retry.due(std::time::Instant::now()) { continue; }
                                 retry.attempted(std::time::Instant::now());
-                                let filter=Filter::new().pubkeys(subscribed_keys.iter().copied()).kind(Kind::NostrConnect).since(Timestamp::from_secs(Timestamp::now().as_secs().saturating_sub(300)));
+                                let Some(keys)=relay_keys.get(url.as_str().trim_end_matches('/')) else {continue;};
+                                let filter=Filter::new().pubkeys(keys.iter().copied()).kind(Kind::NostrConnect).since(Timestamp::from_secs(Timestamp::now().as_secs().saturating_sub(300)));
                                 let _=relay.subscribe(filter).with_id(subscription.clone()).await;
                             }
                         }
@@ -443,6 +500,14 @@ pub async fn relay_supervisor(
                             worker_events.insert(task.id(), worker_id);
                         }
                     }
+                }
+                _ = discovery_tick.tick(), if discovery_jobs.is_empty() => {
+                    let store=state.store.clone();
+                    discovery_jobs.spawn(async move { tokio::time::timeout(Duration::from_secs(90),crate::discovery::poll(&store)).await });
+                }
+                Some(result)=discovery_jobs.join_next(), if !discovery_jobs.is_empty() => {
+                    if !matches!(result,Ok(Ok(Ok(())))) { tracing::warn!("relay discovery incomplete; retry scheduled"); }
+                    refresh.reset_immediately();
                 }
                 _ = state.reload.notified() => { refresh.reset_immediately(); }
                 _ = prune.tick() => { state.store.prune_requests().await?; }
@@ -486,16 +551,20 @@ pub async fn relay_supervisor(
             let delivery_ok = delivery_is_healthy(delivery_failure, std::time::Instant::now());
             state.last_progress.store(progress_tick(),Ordering::Relaxed);
             state.ready.store(initialized && storage_ok && !recovery_pending && state.integrity_ok.load(Ordering::Relaxed) && state.quarantined_grants.load(Ordering::Relaxed)==0
-                && (subscribed_keys.is_empty() || (delivery_ok && accepted.len()>=minimum.max(1) as usize)),Ordering::Relaxed);
+                && (subscribed_keys.is_empty() || (delivery_ok && accepted.iter().filter(|u|baseline.contains(u.trim_end_matches('/'))).count()>=minimum.max(1) as usize)),Ordering::Relaxed);
         }
         Ok(())
     }.await;
     state.ready.store(false, Ordering::Relaxed);
     // Aborting cannot lose an admitted input or committed response; both are durable.
+    discovery_jobs.abort_all();
+    while discovery_jobs.join_next().await.is_some() {}
     workers.abort_all();
     publishers.abort_all();
+    replay_publishers.abort_all();
     while workers.join_next().await.is_some() {}
     while publishers.join_next().await.is_some() {}
+    while replay_publishers.join_next().await.is_some() {}
     processor.shutdown_replication().await;
     let _ = tokio::time::timeout(Duration::from_secs(5), client.shutdown()).await;
     // A graceful stop flushes the last batch; an abrupt crash can lose at most the unflushed buffer.

@@ -20,6 +20,7 @@
     let loadError = $state<string | null>(null);
     let minimumConnectedRelays = $state(1);
     let relayLines = $state("");
+    let autoActivate = $state(false);
 
     $effect(() => {
         if (user?.pubkey) void refresh();
@@ -39,8 +40,9 @@
                 headers: { Authorization: authorization },
             });
             minimumConnectedRelays = status.minimum_connected_relays;
+            autoActivate = status.auto_activate_relays;
             relayLines = status.relays
-                .filter((relay) => relay.enabled)
+                .filter((relay) => relay.enabled && !relay.discovered)
                 .map((relay) => relay.url)
                 .join("\n");
         } catch (error) {
@@ -54,6 +56,31 @@
         }
     }
 
+    async function disableDiscovered(url: string) {
+        if (!user?.pubkey || !status) return;
+        isSaving = true;
+        try {
+            const body = { minimum_connected_relays: status.minimum_connected_relays,
+                relays: [...status.relays.filter(r => !r.discovered).map(r => ({url:r.url, enabled:r.enabled})), {url, enabled:false}] };
+            const authorization = await api.buildAuthHeader("/relays", "PUT", user.pubkey, JSON.stringify(body));
+            await api.put("/relays", body, {headers:{Authorization:authorization}});
+            toast.success("Discovered relay disabled"); await refresh();
+        } catch(error) { toast.error(error instanceof Error ? error.message : String(error)); }
+        finally { isSaving=false; }
+    }
+    async function saveDiscovery() {
+        if (!user?.pubkey) return;
+        isSaving = true;
+        try {
+            const body = { auto_activate: autoActivate };
+            const authorization = await api.buildAuthHeader("/relay-discovery", "PUT", user.pubkey, JSON.stringify(body));
+            await api.put("/relay-discovery", body, { headers: { Authorization: authorization } });
+            toast.success("Relay discovery policy saved");
+            await refresh();
+        } catch (error) {
+            toast.error(error instanceof Error ? error.message : String(error));
+        } finally { isSaving = false; }
+    }
     async function saveRelays() {
         if (!user?.pubkey) return;
         const relays = relayLines
@@ -63,7 +90,7 @@
             .map((url) => ({ url, enabled: true }));
         const body = {
             minimum_connected_relays: minimumConnectedRelays,
-            relays,
+            relays: [...relays, ...(status?.relays ?? []).filter(r => !r.discovered && !r.enabled && !relays.some(v => v.url === r.url)).map(r => ({url:r.url,enabled:false}))],
         };
         isSaving = true;
         try {
@@ -199,7 +226,11 @@
         </p>
         {#each status.relays as relay (relay.id)}<RelayHealthRow
                 {relay}
-            />{/each}
+            />
+            {#if relay.discovered && relay.enabled}
+                <button class="button button-secondary mb-3" disabled={isSaving} onclick={() => disableDiscovered(relay.url)}>Disable discovered relay</button>
+            {/if}
+        {/each}
     </div>
 
     <div class="card mb-5">
@@ -216,6 +247,16 @@
         </div>
     </div>
 
+    <section class="border border-border p-5 mb-6">
+        <h2 class="text-xl font-bold mb-3">Relay discovery</h2>
+        <label class="flex items-center gap-3 mb-3">
+            <input type="checkbox" bind:checked={autoActivate} />
+            Activate compatible public relays from imported keys’ NIP-65 lists
+        </label>
+        <p class="text-muted text-sm mb-4">Lists are cached and refreshed in the background. Each key can add up to four signing relays, within the instance limit of twenty. Relays must pass a signing-transport check. Turning this off stops new activation; existing routes stay available for connected clients.</p>
+        <button class="button button-secondary" onclick={saveDiscovery} disabled={isSaving}>Save discovery policy</button>
+        <p class="text-muted text-sm mt-4">Cached retries: {status.signer.cached_retries} · coalesced: {status.signer.retry_coalesced} · throttled: {status.signer.retry_throttled} · storage rejections: {status.signer.storage_rejections}</p>
+    </section>
     <form
         class="card flex flex-col gap-4"
         onsubmit={(event) => {

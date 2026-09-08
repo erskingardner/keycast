@@ -24,6 +24,10 @@ const MAX_FUTURE_SKEW_SECONDS: u64 = 60;
 pub struct RuntimeMetrics {
     pub ingress_rejections: AtomicU64,
     pub parse_errors: AtomicU64,
+    pub cached_retries: AtomicU64,
+    pub retry_coalesced: AtomicU64,
+    pub retry_throttled: AtomicU64,
+    pub storage_rejections: AtomicU64,
     pub denied_requests: AtomicU64,
     pub relay_failures: AtomicU64,
 }
@@ -218,6 +222,9 @@ impl RequestProcessor {
             Ok(false) => return Ok(None),
             Err(StoreError::Capacity) => {
                 self.metrics
+                    .storage_rejections
+                    .fetch_add(1, Ordering::Relaxed);
+                self.metrics
                     .ingress_rejections
                     .fetch_add(1, Ordering::Relaxed);
                 return Err(ProtocolError::Capacity(Box::new(build_response(
@@ -325,7 +332,7 @@ impl RequestProcessor {
                 Ok(Execution::success("pong".to_string(), Some(session.id)))
             }
             "switch_relays" if request.params.is_empty() => {
-                let relays = self.store.enabled_relays().await?;
+                let relays = self.store.transport_relays(grant.stored_key_id).await?;
                 let result = serde_json::to_string(&relays)
                     .map_err(|e| StoreError::InvalidInput(e.to_string()))?;
                 Ok(Execution::success(result, Some(session.id)))
@@ -590,8 +597,22 @@ impl RequestProcessor {
         client: &Client,
         response: &Event,
     ) -> Result<(), ProtocolError> {
+        let Some(grant) = self
+            .store
+            .grant_for_recipient(&response.pubkey.to_hex())
+            .await?
+        else {
+            return Err(ProtocolError::UnknownGrant);
+        };
+        let allowed = self.store.transport_relays(grant.stored_key_id).await?;
         let mut sends = tokio::task::JoinSet::new();
         for (url, relay) in client.relays().await {
+            if !allowed
+                .iter()
+                .any(|u| u.trim_end_matches('/') == url.as_str().trim_end_matches('/'))
+            {
+                continue;
+            }
             let response = response.clone();
             sends.spawn(async move {
                 let result = tokio::time::timeout(std::time::Duration::from_secs(3), async {
@@ -635,7 +656,7 @@ impl RequestProcessor {
     }
 }
 
-fn validate_outer_event(event: &Event) -> Result<(), ProtocolError> {
+pub(crate) fn validate_outer_event(event: &Event) -> Result<(), ProtocolError> {
     if event.kind != Kind::NostrConnect
         || event.content.len() > MAX_EVENT_CONTENT_BYTES
         || event.as_json().len() > MAX_EVENT_CONTENT_BYTES + 4096

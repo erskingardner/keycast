@@ -34,6 +34,7 @@ pub struct Observation {
 #[derive(Debug, Default)]
 struct Buffer {
     configured: BTreeSet<String>,
+    restricted: BTreeSet<String>,
     attempted: BTreeSet<String>,
     pending: BTreeMap<(String, i64, &'static str), Observation>,
     dropped: BTreeMap<String, i64>,
@@ -42,6 +43,12 @@ struct Buffer {
 #[derive(Debug, Clone, Default)]
 pub struct RelayTelemetry(Arc<Mutex<Buffer>>);
 impl RelayTelemetry {
+    pub fn restrict(&self, urls: Vec<String>) {
+        self.0.lock().unwrap_or_else(|e| e.into_inner()).restricted = urls
+            .into_iter()
+            .map(|s| s.trim_end_matches('/').to_owned())
+            .collect();
+    }
     pub fn configure(&self, urls: &[String]) {
         let mut b = self.0.lock().unwrap_or_else(|e| e.into_inner());
         b.configured = urls
@@ -129,6 +136,15 @@ pub fn error_category(error: &str) -> &'static str {
 
 pub fn description(category: &str) -> &'static str {
     match category {
+        "cached_retry" => "Cached response retry queued",
+        "retry_coalesced" => "Repeated cached response delivery coalesced",
+        "retry_throttled" => "Cached response retry budget full",
+        "admission_running_global" => "Fresh request rejected: instance workers full",
+        "admission_running_client" => "Fresh request rejected: client workers full",
+        "admission_running_grant" => "Fresh request rejected: grant workers full",
+        "admission_rate_global" => "Fresh request rejected: instance rate limit",
+        "admission_rate_client" => "Fresh request rejected: client rate limit",
+        "admission_rate_grant" => "Fresh request rejected: grant rate limit",
         "attempt" => "Connection attempt",
         "retry" => "Reconnection attempt",
         "connected" => "WebSocket connected",
@@ -184,7 +200,22 @@ impl WebSocketTransport for ObservedTransport {
                 url: url.to_string(),
                 finished: false,
             };
-            let result = DefaultWebsocketTransport.connect(url, proxy).await;
+            let restricted = self
+                .0
+                 .0
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .restricted
+                .contains(url.as_str().trim_end_matches('/'));
+            let result = if restricted {
+                if proxy.is_some() {
+                    Err(Error::policy("discovered relay proxy forbidden"))
+                } else {
+                    crate::public_relay::connect(url).await
+                }
+            } else {
+                DefaultWebsocketTransport.connect(url, proxy).await
+            };
             attempt.finished = true;
             match result {
                 Ok((sink, stream)) => {

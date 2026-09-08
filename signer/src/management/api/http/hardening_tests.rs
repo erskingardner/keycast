@@ -504,3 +504,18 @@ fn external_approval_has_a_bounded_human_review_window() {
         assert_eq!(validate_auth_event(&event,&req,&[],"http://example.com/api").is_ok(),accepted);
     }
 }
+
+#[tokio::test]
+async fn discovery_policy_requires_operator_and_signed_approval() {
+    let _guard=ENV_LOCK.lock().unwrap(); let pool=setup_route_test_db().await;
+    let operator=Keys::generate(); let member=Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS",format!("{},{}",operator.public_key().to_hex(),member.public_key().to_hex()));
+    env::set_var("KEYCAST_OPERATOR_PUBKEYS",operator.public_key().to_hex());
+    let app=routes::routes(state(pool.clone()));
+    assert_eq!(route_request(&app,&pool,&member,"PUT","/relay-discovery",r#"{"auto_activate":true}"#).await.status,403);
+    assert!(!query_scalar::<_,bool>("SELECT auto_activate FROM relay_discovery_policy").fetch_one(&pool).await.unwrap());
+    assert_eq!(route_request(&app,&pool,&operator,"PUT","/relay-discovery",r#"{"auto_activate":true}"#).await.status,204);
+    assert!(query_scalar::<_,bool>("SELECT auto_activate FROM relay_discovery_policy").fetch_one(&pool).await.unwrap());
+    assert_eq!(route_request(&app,&pool,&operator,"PUT","/relay-discovery",r#"{"auto_activate":true,"allow_private":true}"#).await.status,422);
+    env::remove_var("ALLOWED_PUBKEYS"); env::remove_var("KEYCAST_OPERATOR_PUBKEYS");
+}

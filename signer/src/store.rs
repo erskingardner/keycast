@@ -188,7 +188,7 @@ impl Store {
         let remote_secret = Zeroizing::new(remote_keys.secret_key().secret_bytes());
         let (invitation_secret, invitation_hash) = generate_invitation_secret()?;
         let bunker_uri = self
-            .bunker_uri(&remote_public_key, &invitation_secret)
+            .bunker_uri(stored_key_id, &remote_public_key, &invitation_secret)
             .await?;
 
         let mut transaction = self.pool.begin().await?;
@@ -279,7 +279,9 @@ impl Store {
             ));
         }
         let (secret, hash) = generate_invitation_secret()?;
-        let bunker_uri = self.bunker_uri(&remote_public_key, &secret).await?;
+        let bunker_uri = self
+            .bunker_uri(stored_key_id, &remote_public_key, &secret)
+            .await?;
         let mut transaction = self.pool.begin().await?;
         let id: i64 = query_scalar(
             "INSERT INTO invitations(grant_id, secret_hash, expires_at, created_at)
@@ -445,11 +447,11 @@ impl Store {
     }
 
     pub async fn enabled_relays(&self) -> Result<Vec<String>, StoreError> {
-        Ok(
-            query_scalar("SELECT url FROM relays WHERE enabled = 1 ORDER BY sort_order, id")
-                .fetch_all(&self.pool)
-                .await?,
+        Ok(query_scalar(
+            "SELECT url FROM relays WHERE enabled = 1 AND discovered=0 ORDER BY sort_order, id",
         )
+        .fetch_all(&self.pool)
+        .await?)
     }
 
     pub async fn mark_relay_connected(&self, url: &str) -> Result<(), StoreError> {
@@ -986,10 +988,11 @@ impl Store {
 
     async fn bunker_uri(
         &self,
+        stored_key_id: i64,
         remote_public_key: &str,
         secret: &str,
     ) -> Result<String, StoreError> {
-        let relays = self.enabled_relays().await?;
+        let relays = self.transport_relays(stored_key_id).await?;
         if relays.is_empty() {
             return Err(StoreError::InvalidInput(
                 "at least one enabled relay is required".to_string(),
@@ -1163,10 +1166,14 @@ mod tests {
             .execute(&pool)
             .await
             .expect("enable foreign keys");
-        raw_sql(include_str!("../../database/migrations/0001_initial.sql"))
-            .execute(&pool)
-            .await
-            .expect("apply v2 schema");
+        raw_sql(concat!(
+            include_str!("../../database/migrations/0001_initial.sql"),
+            "\n",
+            include_str!("../../database/migrations/0004_key_relay_discovery.sql")
+        ))
+        .execute(&pool)
+        .await
+        .expect("apply v2 schema");
 
         let team_id: i64 = query_scalar("INSERT INTO teams(name) VALUES ('Family') RETURNING id")
             .fetch_one(&pool)

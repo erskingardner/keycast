@@ -328,7 +328,15 @@ pub async fn get_key(
             invitations: invitations_by_grant.remove(&row.0).unwrap_or_default(),
         });
     }
+    let relay_discovery = state
+        .signer
+        .runtime
+        .store
+        .key_relay_info(stored_key.id)
+        .await
+        .map_err(|_| ApiError::Internal)?;
     Ok(Json(KeyWithRelations {
+        relay_discovery,
         team: team(&state.db, id).await?,
         stored_key,
         grants,
@@ -619,6 +627,13 @@ pub async fn status(
     )
     .fetch_all(&state.db)
     .await?;
+    let discovered_ids: Vec<i64> = query_scalar("SELECT id FROM relays WHERE discovered=1")
+        .fetch_all(&state.db)
+        .await?;
+    let auto_activate_relays =
+        query_scalar("SELECT auto_activate FROM relay_discovery_policy WHERE singleton=1")
+            .fetch_one(&state.db)
+            .await?;
     let diagnostics = state.signer.runtime.relay_diagnostics.read().await.clone();
     let mut reliability = state.signer.runtime.store.relay_reliability().await?;
     let relays = relay_rows
@@ -626,6 +641,7 @@ pub async fn status(
         .map(|row| RelayStatus {
             diagnostics: diagnostics.get(row.1.trim_end_matches('/')).cloned(),
             reliability: reliability.remove(&row.0),
+            discovered: discovered_ids.contains(&row.0),
             id: row.0,
             url: row.1,
             enabled: row.2 == 1,
@@ -645,6 +661,7 @@ pub async fn status(
         ControlResponse::Status { status } => Ok(Json(StatusResponse {
             signer: status,
             database_ok,
+            auto_activate_relays,
             minimum_connected_relays,
             relays,
         })),
@@ -704,7 +721,7 @@ pub async fn update_relays(
     let mut transaction = state.db.begin().await?;
     let urls = serde_json::to_string(&normalized.iter().map(|(url, _)| url).collect::<Vec<_>>())
         .map_err(|_| ApiError::Internal)?;
-    query("DELETE FROM relays WHERE url NOT IN (SELECT value FROM json_each(?))")
+    query("DELETE FROM relays WHERE discovered=0 AND url NOT IN (SELECT value FROM json_each(?))")
         .bind(urls)
         .execute(&mut *transaction)
         .await?;
@@ -712,7 +729,7 @@ pub async fn update_relays(
         query(
             "INSERT INTO relays(url, enabled, sort_order) VALUES (?, ?, ?)
              ON CONFLICT(url) DO UPDATE SET enabled = excluded.enabled,
-                 sort_order = excluded.sort_order, updated_at = unixepoch()",
+                 sort_order = excluded.sort_order, discovered=0, updated_at = unixepoch()",
         )
         .bind(url)
         .bind(enabled)
@@ -753,11 +770,15 @@ pub async fn update_relays(
     )
     .fetch_all(&state.db)
     .await?;
+    let discovered_ids: Vec<i64> = query_scalar("SELECT id FROM relays WHERE discovered=1")
+        .fetch_all(&state.db)
+        .await?;
     Ok(Json(
         rows.into_iter()
             .map(|row| RelayStatus {
                 diagnostics: None,
                 reliability: None,
+                discovered: discovered_ids.contains(&row.0),
                 id: row.0,
                 url: row.1,
                 enabled: row.2 == 1,
@@ -1036,4 +1057,27 @@ pub fn require_operator(actor: &str) -> ApiResult<()> {
     } else {
         Err(ApiError::Forbidden)
     }
+}
+
+pub async fn update_discovery_policy(
+    State(state): State<KeycastState>,
+    AuthEvent(event): AuthEvent,
+    Json(request): Json<RelayDiscoveryPolicy>,
+) -> ApiResult<StatusCode> {
+    require_operator(&event.pubkey.to_hex())?;
+    let mut tx = state.db.begin().await?;
+    query("UPDATE relay_discovery_policy SET auto_activate=? WHERE singleton=1")
+        .bind(request.auto_activate)
+        .execute(&mut *tx)
+        .await?;
+    query("UPDATE key_relay_lists SET next_fetch_at=0")
+        .execute(&mut *tx)
+        .await?;
+    query("INSERT INTO audit_events(actor_public_key,action,outcome) VALUES(?,'relay_discovery.update','succeeded')").bind(event.pubkey.to_hex()).execute(&mut *tx).await?;
+    query("UPDATE instance_settings SET authority_revision=authority_revision+1 WHERE singleton=1")
+        .execute(&mut *tx)
+        .await?;
+    tx.commit().await?;
+    state.signer.request(&LifecycleRequest::Reload).await?;
+    Ok(StatusCode::NO_CONTENT)
 }

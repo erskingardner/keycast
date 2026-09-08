@@ -4,9 +4,9 @@ The test instance is live at https://keycast.ipf.dev on `91.98.92.28` (Debian 13
 approximately 2 GB RAM). This records initial deployment and protocol evidence,
 not completion of the acceptance matrix or approval for real private keys.
 
-**Current run:** the original soak was stopped early for fixes. A fresh 24-hour
-run started September 7 at 08:55:38 UTC and ends September 8 at 08:55:38 UTC
-(10:55 Europe/Rome). The completion review is scheduled for 11:06 Europe/Rome.
+**Completed:** the corrected 24-hour workload finished September 8 with all 279
+runs passing. See [the completion report](SOAK_RESULTS_2026-09-08.md) for remaining
+relay/admission findings, performance, and coverage limits. The application remains running.
 The historical deployment and original-run evidence below are retained for comparison.
 
 ## Build provenance

@@ -21,7 +21,7 @@ async function status() {
  const response=await fetch(base+'/status',{headers:{authorization:'Nostr '+Buffer.from(JSON.stringify(event)).toString('base64')},signal:AbortSignal.timeout(10000)});
  assert(response.ok, 'Status request failed');
  const s=await response.json(), m=s.signer;
- return {ready:m.ready,integrity_ok:m.integrity_ok,connected_relays:m.connected_relays,ingress_rejections:m.ingress_rejections,parse_errors:m.parse_errors,relay_failures:m.relay_failures,resources:m.resources,relays:s.relays.map(r=>({relay:new URL(r.url).origin,connection:r.diagnostics?.connection,subscription:r.diagnostics?.subscription,lifetime:r.reliability?.lifetime}))};
+ return {ready:m.ready,integrity_ok:m.integrity_ok,connected_relays:m.connected_relays,ingress_rejections:m.ingress_rejections,cached_retries:m.cached_retries,retry_coalesced:m.retry_coalesced,retry_throttled:m.retry_throttled,storage_rejections:m.storage_rejections,parse_errors:m.parse_errors,relay_failures:m.relay_failures,resources:m.resources,relays:s.relays.map(r=>({relay:new URL(r.url).origin,connection:r.diagnostics?.connection,subscription:r.diagnostics?.subscription,lifetime:r.reliability?.lifetime}))};
 }
 function errorClass(error) {
  if(String(error)==='Error: timeout'||error?.name==='TimeoutError') return 'timeout';
@@ -45,8 +45,8 @@ function instrument(signer) {
  let activeMethod; const send=signer.sendRequest.bind(signer), publish=signer.pool.publish.bind(signer.pool);
  signer.sendRequest=(method,params)=>{activeMethod=method; return send(method,params);};
  signer.pool.publish=(relays,event,...args)=>{
-  const method=activeMethod;
-  const promises=publish(relays,event,...args).map((promise,i)=>promise.then(value=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:true});return value;},error=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:false,reason:closing?'client_closed':relayReason(error)});throw error;}));
+  const method=activeMethod; const started=performance.now();
+  const promises=publish(relays,event,...args).map((promise,i)=>promise.then(value=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:true,ms:Math.round(performance.now()-started)});return value;},error=>{publications.push({method,event_id:event.id,relay:new URL(relays[i]).origin,ok:false,reason:closing?'client_closed':relayReason(error),phase:String(error).includes('connection failure:')?'connect':'publish',ms:Math.round(performance.now()-started)});throw error;}));
   publicationWaits.push(...promises); return promises;
  };
 }
@@ -72,6 +72,7 @@ try {
   writeFileSync('/secrets/state.json',JSON.stringify(state),{mode:0o600});
  }
  await step('ping',()=>signer.ping());
+ await step('switch_relays',async()=>{const relays=JSON.parse(await signer.sendRequest('switch_relays',[]));assert(Array.isArray(relays)&&relays.length>0&&relays.length<=20);await signer.switchRelays();});
  await step('get_public_key',async()=>assert.equal(await signer.getPublicKey(),managed));
  await step('sign_event',async()=>{
   const event=await signer.signEvent({kind:1,created_at:now(),tags:[],content:'Disposable Keycast VM signing test; not published.'});

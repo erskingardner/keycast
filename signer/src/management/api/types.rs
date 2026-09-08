@@ -121,6 +121,7 @@ pub struct KeyWithRelations {
     pub team: Team,
     pub stored_key: StoredKeySummary,
     pub grants: Vec<GrantWithStatus>,
+    pub relay_discovery: crate::discovery::KeyRelayInfo,
 }
 
 #[derive(Debug, Serialize)]
@@ -139,6 +140,7 @@ pub struct InvitationCreationResponse {
 pub struct StatusResponse {
     pub signer: SignerStatus,
     pub database_ok: bool,
+    pub auto_activate_relays: bool,
     pub minimum_connected_relays: i64,
     pub relays: Vec<RelayStatus>,
 }
@@ -159,6 +161,7 @@ pub struct UpdateRelaysRequest {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct RelayStatus {
+    pub discovered: bool,
     pub id: i64,
     pub url: String,
     pub enabled: bool,
@@ -183,4 +186,10 @@ pub struct AuditEvent {
     pub outcome: String,
     pub reason_code: Option<String>,
     pub request_event_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelayDiscoveryPolicy {
+    pub auto_activate: bool,
 }

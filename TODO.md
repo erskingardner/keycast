@@ -8,6 +8,14 @@ The locally implementable audit hardening and expanded test suite are tracked in
 - [x] Rehearse Caddy/TLS and the exact digest-pinned stack on the target disposable VM.
   Deployed and verified September 6, 2026; see `docs/VM_TEST_RUN_2026-09-06.md`.
 - [ ] Multi-day public-relay soak and real host power-loss/storage-fault rehearsal; local process-kill, relay and SQLite-full tests are implemented.
+  The corrected 24-hour sampled workload passed all 279 runs; remaining relay/admission
+  findings and coverage limits are in `docs/SOAK_RESULTS_2026-09-08.md`.
+- [x] Separate bounded cached-response retry handling from fresh-request admission and test
+  reconnect bursts with concurrent fresh work; retain timeout-phase and rejection-limit counters.
+- [x] Add cached NIP-65 discovery on import with operator-controlled activation, network-destination
+  restrictions and per-key routing. Protocol relay switching is tested; Jumble automatic
+  adoption remains a client compatibility limitation (keep baseline routes available). Investigation and proposed
+  ordering: `docs/RELAY_INVESTIGATION_2026-09-08.md`.
 - [ ] Complete the VM key-operation matrix below, including encryption/decryption rather than signing alone.
 - [ ] Select off-host backup storage and enable the provided encrypted upload/verification/retention and age-monitoring jobs.
 - [ ] Configure host/proxy connection limits and connect the provided capacity/readiness monitor to an external alert receiver.

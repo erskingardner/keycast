@@ -18,6 +18,7 @@ fn protected_routes(state: KeycastState) -> Router<KeycastState> {
     Router::new()
         .route("/status", get(teams::status))
         .route("/relays", put(teams::update_relays))
+        .route("/relay-discovery", put(teams::update_discovery_policy))
         .route("/teams", get(teams::list_teams).post(teams::create_team))
         .route(
             "/teams/{id}",

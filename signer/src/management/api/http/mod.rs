@@ -538,8 +538,10 @@ mod tests {
             .execute(&pool)
             .await
             .unwrap();
-        raw_sql(include_str!(
-            "../../../../../database/migrations/0001_initial.sql"
+        raw_sql(concat!(
+            include_str!("../../../../../database/migrations/0001_initial.sql"),
+            "\n",
+            include_str!("../../../../../database/migrations/0004_key_relay_discovery.sql")
         ))
         .execute(&pool)
         .await

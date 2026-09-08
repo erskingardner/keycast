@@ -3,6 +3,7 @@ import { relayHealth } from "./relay_health";
 import type { RelayStatus } from "$lib/types";
 
 const relay: RelayStatus = {
+    discovered: false,
     id: 1,
     url: "wss://relay.example",
     enabled: true,

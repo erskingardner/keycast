@@ -44,7 +44,9 @@ impl Fixture {
         raw_sql(concat!(
             include_str!("../../database/migrations/0001_initial.sql"),
             "\n",
-            include_str!("../../database/migrations/0003_relay_reliability.sql")
+            include_str!("../../database/migrations/0003_relay_reliability.sql"),
+            "\n",
+            include_str!("../../database/migrations/0004_key_relay_discovery.sql")
         ))
         .execute(&pool)
         .await
@@ -87,7 +89,15 @@ impl Fixture {
             .await
             .unwrap();
         let remote = store
-            .decrypt_remote_keys(&store.active_grants().await.unwrap()[0])
+            .decrypt_remote_keys(
+                &store
+                    .active_grants()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|g| g.id == grant.id)
+                    .unwrap(),
+            )
             .unwrap();
         Self {
             store,
@@ -1582,7 +1592,9 @@ async fn runtime_recovers_from_pool_pressure_without_restarting() {
     raw_sql(concat!(
         include_str!("../../database/migrations/0001_initial.sql"),
         "\n",
-        include_str!("../../database/migrations/0003_relay_reliability.sql")
+        include_str!("../../database/migrations/0003_relay_reliability.sql"),
+        "\n",
+        include_str!("../../database/migrations/0004_key_relay_discovery.sql")
     ))
     .execute(&pool)
     .await
@@ -1671,4 +1683,151 @@ async fn idle_connected_relays_clear_stale_errors_without_a_signing_subscription
         "local shutdown is not a peer-forced close"
     );
     relay.shutdown();
+}
+
+#[tokio::test]
+async fn completed_reconnect_backlog_does_not_reject_fresh_requests() {
+    let relay = LocalRelay::new();
+    relay.run().await.unwrap();
+    let f = Fixture::new(relay.url().await.as_str()).await;
+    let processor = f.processor();
+    processor.prepare_response(&f.connect()).await.unwrap();
+    let mut requests = Vec::new();
+    for n in 0..13 {
+        let event = f.event(&format!("replay-{n}"), "ping", vec![]);
+        processor.prepare_response(&event).await.unwrap();
+        f.store
+            .mark_published(&event.id.to_hex(), true)
+            .await
+            .unwrap();
+        requests.push(event);
+    }
+    let observer = Client::new();
+    observer.add_relay(relay.url().await).await.unwrap();
+    let mut stream = observer.notifications();
+    observer.connect().and_wait(Duration::from_secs(2)).await;
+    observer
+        .subscribe(
+            Filter::new()
+                .kind(Kind::NostrConnect)
+                .pubkey(f.client.public_key()),
+        )
+        .await
+        .unwrap();
+    let state = RuntimeState::new(f.store.clone());
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(relay_supervisor(state.clone(), rx));
+    ready(&state).await;
+    // Runtime restart loaded only durable IDs. Hold authority to keep the replay
+    // workers busy while all thirteen old requests and a fresh one arrive.
+    let authority = f.store.authority.lock().await;
+    for event in &requests {
+        observer.send_event(event).await.unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(3), async {
+        while state.metrics.cached_retries.load(Ordering::Relaxed) < 13 {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    observer
+        .send_event(&f.event("fresh-after-replay", "ping", vec![]))
+        .await
+        .unwrap();
+    drop(authority);
+    assert_eq!(
+        reply(&mut stream, "fresh-after-replay", &f).await["result"],
+        "pong"
+    );
+    assert_eq!(state.metrics.ingress_rejections.load(Ordering::Relaxed), 0);
+
+    // Also check the durable record count: no operation was re-executed under a new ID.
+    let records: i64 = query_scalar("SELECT count(*) FROM processed_requests WHERE method='ping'")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(records, 14);
+
+    stop.send(true).unwrap();
+    task.await.unwrap().unwrap();
+    observer.shutdown().await;
+    relay.shutdown();
+}
+
+#[tokio::test]
+async fn relay_discovery_scopes_advertising_and_response_publication_to_owning_key() {
+    let baseline = LocalRelay::new();
+    baseline.run().await.unwrap();
+    let first = Fixture::new(baseline.url().await.as_str()).await;
+    let second = Fixture::populate(first.store.pool.clone(), baseline.url().await.as_str()).await;
+    let scoped = LocalRelay::new();
+    scoped.run().await.unwrap();
+    let url = scoped.url().await.to_string();
+    let relay_id: i64 = query_scalar("INSERT INTO relays(url,discovered) VALUES(?,1) RETURNING id")
+        .bind(&url)
+        .fetch_one(&first.store.pool)
+        .await
+        .unwrap();
+    let key = first
+        .store
+        .active_grants()
+        .await
+        .unwrap()
+        .into_iter()
+        .find(|g| g.id == first.grant)
+        .unwrap()
+        .stored_key_id;
+    query("INSERT INTO key_relays(stored_key_id,url,read,write,relay_id,status) VALUES(?,?,1,1,?,'compatible')").bind(key).bind(&url).bind(relay_id).execute(&first.store.pool).await.unwrap();
+    let a = first.processor();
+    let b = second.processor();
+    a.prepare_response(&first.connect()).await.unwrap();
+    b.prepare_response(&second.connect()).await.unwrap();
+    let r = a
+        .prepare_response(&first.event("switch-first", "switch_relays", vec![]))
+        .await
+        .unwrap()
+        .unwrap();
+    let advertised: Vec<String> =
+        serde_json::from_str(first.decrypt(&r)["result"].as_str().unwrap()).unwrap();
+    assert!(advertised.contains(&url));
+    let r = b
+        .prepare_response(&second.event("switch-second", "switch_relays", vec![]))
+        .await
+        .unwrap()
+        .unwrap();
+    let advertised: Vec<String> =
+        serde_json::from_str(second.decrypt(&r)["result"].as_str().unwrap()).unwrap();
+    assert!(!advertised.contains(&url));
+    let client = Client::new();
+    client.add_relay(baseline.url().await).await.unwrap();
+    client.add_relay(scoped.url().await).await.unwrap();
+    client.connect().and_wait(Duration::from_secs(2)).await;
+    b.publish_response(&client, &r).await.unwrap();
+    b.shutdown_replication().await;
+    let leaked: i64 = query_scalar(
+        "SELECT count(*) FROM relay_checkpoints WHERE relay_id=? AND last_published_at IS NOT NULL",
+    )
+    .bind(relay_id)
+    .fetch_one(&first.store.pool)
+    .await
+    .unwrap();
+    assert_eq!(
+        leaked, 0,
+        "unrelated key response must not be published on the discovered relay"
+    );
+    query("UPDATE key_relays SET retire_at=unixepoch()-1 WHERE relay_id=?")
+        .bind(relay_id)
+        .execute(&first.store.pool)
+        .await
+        .unwrap();
+    assert!(!first
+        .store
+        .transport_relays(key)
+        .await
+        .unwrap()
+        .contains(&url));
+    client.shutdown().await;
+    baseline.shutdown();
+    scoped.shutdown();
 }
