@@ -92,3 +92,16 @@ namespace, and five followed a signer restart. All test firewall rules were
 removed. The client retained sessions across the restart. Individual publication
 results included 68 Damus rate-limit rejections and one Damus HTTP 503; redundant
 routes delivered every tested RPC. These relay failures remain in the results.
+
+The fresh 24-hour window started **September 8 at 10:37:09 UTC** and ends
+**September 9 at 10:37:09 UTC (12:37 Europe/Rome)**. The first systemd workload
+passed all 19 checks with valid integrity and no new admission rejection. The
+five-minute timer is enabled on the VM and stops scheduling when the deadline
+is reached. This is a sampled workload, not continuous maximum-load traffic.
+
+Harness revision: `d0caf3d6535286ae726c1129c6fabeb78ad7acb1`; file SHA256:
+`a892317710da8217d3fb9823886a0635aaca8f27b1d744bed6c41eb9f6b8e682`.
+Runtime remains pinned to the independently validated `a942648` images above.
+The existing completion reminder was updated for September 9 at 12:45 Europe/Rome.
+The 24-hour result is pending; this rollout is not a completed soak or an
+independent security certification.
