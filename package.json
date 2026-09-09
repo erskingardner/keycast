@@ -24,6 +24,6 @@
 		"concurrently": "10.0.5"
 	},
 	"dependencies": {
-		"@types/bun": "1.4.0"
+		"@types/bun": "1.4.1"
 	}
 }
