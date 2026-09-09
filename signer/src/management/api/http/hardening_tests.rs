@@ -519,3 +519,196 @@ async fn discovery_policy_requires_operator_and_signed_approval() {
     assert_eq!(route_request(&app,&pool,&operator,"PUT","/relay-discovery",r#"{"auto_activate":true,"allow_private":true}"#).await.status,422);
     env::remove_var("ALLOWED_PUBKEYS"); env::remove_var("KEYCAST_OPERATOR_PUBKEYS");
 }
+
+#[tokio::test]
+async fn team_delete_removes_grants_that_would_otherwise_block_the_cascade() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let pool = setup_route_test_db().await;
+    let admin = Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS", admin.public_key().to_hex());
+    let app = crate::management::api::http::routes::routes(state(pool.clone()));
+
+    let team: i64 = query_scalar("INSERT INTO teams(name) VALUES('Doomed') RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    member_row(&pool, team, &admin, "admin").await;
+    let stored_key: i64 = query_scalar(
+        "INSERT INTO stored_keys(team_id,name,public_key,secret_envelope,envelope_version,key_encryption_key_id) VALUES(?,'k',?,x'01',1,'kid') RETURNING id")
+        .bind(team)
+        .bind(Keys::generate().public_key().to_hex())
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    let policy: i64 = query_scalar(
+        "INSERT INTO policies(team_id,name,document) VALUES(?,'p','{\"version\":1}') RETURNING id",
+    )
+    .bind(team)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    // A revoked grant is a tombstone, so it blocks the cascade exactly like a live one.
+    for (name, revoked) in [("live", false), ("revoked", true)] {
+        let grant: i64 = query_scalar(
+            "INSERT INTO grants(team_id,stored_key_id,policy_id,name,remote_signer_public_key,remote_signer_secret_envelope,envelope_version,key_encryption_key_id) VALUES(?,?,?,?,?,x'01',1,'kid') RETURNING id")
+            .bind(team).bind(stored_key).bind(policy).bind(name)
+            .bind(Keys::generate().public_key().to_hex())
+            .fetch_one(&pool).await.unwrap();
+        let invitation: i64 = query_scalar(
+            "INSERT INTO invitations(grant_id,secret_hash,expires_at) VALUES(?,randomblob(32),unixepoch()+3600) RETURNING id")
+            .bind(grant).fetch_one(&pool).await.unwrap();
+        query("INSERT INTO sessions(grant_id,invitation_id,client_public_key) VALUES(?,?,?)")
+            .bind(grant)
+            .bind(invitation)
+            .bind(Keys::generate().public_key().to_hex())
+            .execute(&pool)
+            .await
+            .unwrap();
+        if revoked {
+            query("UPDATE grants SET revoked_at=unixepoch() WHERE id=?")
+                .bind(grant)
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+    }
+
+    let path = format!("/teams/{team}");
+    let reply = route_request(&app, &pool, &admin, "DELETE", &path, "").await;
+    assert_eq!(reply.status, StatusCode::NO_CONTENT.as_u16());
+    let remaining: (i64, i64, i64, i64, i64, i64, i64) = query_as(
+        "SELECT (SELECT count(*) FROM teams),(SELECT count(*) FROM grants),
+                (SELECT count(*) FROM sessions),(SELECT count(*) FROM invitations),
+                (SELECT count(*) FROM stored_keys),(SELECT count(*) FROM policies),
+                (SELECT count(*) FROM team_members)",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(remaining, (0, 0, 0, 0, 0, 0, 0));
+    // The audit trail outlives the team, with its links cleared.
+    let recorded: i64 =
+        query_scalar("SELECT count(*) FROM audit_events WHERE action='team.delete'")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(recorded, 1);
+    env::remove_var("ALLOWED_PUBKEYS");
+}
+
+#[tokio::test]
+async fn approval_content_carrying_private_material_is_refused() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let pool = setup_route_test_db().await;
+    let admin = Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS", admin.public_key().to_hex());
+    let app = crate::management::api::http::routes::routes(state(pool.clone()));
+    let team: i64 = query_scalar("INSERT INTO teams(name) VALUES('Keys') RETURNING id")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    member_row(&pool, team, &admin, "admin").await;
+    let endpoint = format!("/teams/{team}/keys");
+    let imported = Keys::generate();
+
+    // An operator pasting a private key into the name field would otherwise ship it
+    // to the external signer inside the approval event's content.
+    let pasted = format!(
+        r#"{{"name":"{}","secret_key":"{}"}}"#,
+        imported.secret_key().to_bech32().unwrap(),
+        imported.secret_key().to_secret_hex()
+    );
+    let reply = route_request(&app, &pool, &admin, "POST", &endpoint, &pasted).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST.as_u16());
+    assert!(!reply.body.contains("nsec1"));
+
+    // A named import still works, and its approval never carries the key.
+    let clean = format!(
+        r#"{{"name":"Personal identity","secret_key":"{}"}}"#,
+        imported.secret_key().to_secret_hex()
+    );
+    let reply = route_request(&app, &pool, &admin, "POST", &endpoint, &clean).await;
+    assert_eq!(reply.status, StatusCode::CREATED.as_u16());
+    let stored: i64 = query_scalar("SELECT count(*) FROM stored_keys")
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(stored, 1);
+    env::remove_var("ALLOWED_PUBKEYS");
+}
+
+#[tokio::test]
+async fn management_replies_come_from_the_published_stable_identity() {
+    let _guard = ENV_LOCK.lock().unwrap();
+    let pool = setup_route_test_db().await;
+    let admin = Keys::generate();
+    env::set_var("ALLOWED_PUBKEYS", admin.public_key().to_hex());
+    let app = crate::management::api::http::routes::routes(state(pool.clone()));
+
+    // The browser learns the reply identity from /config and pins it.
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method(Method::GET)
+                .uri(format!("/config?pubkey={}", admin.public_key().to_hex()))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    let config: serde_json::Value = serde_json::from_slice(
+        &to_bytes(response.into_body(), MAX_AUTH_BODY_BYTES)
+            .await
+            .unwrap(),
+    )
+    .unwrap();
+    let published = config["management_reply_public_key"]
+        .as_str()
+        .expect("published reply identity")
+        .to_owned();
+    let pinned = PublicKey::from_hex(&published).unwrap();
+
+    // Every write reply must come from that identity, not a per-reply ephemeral key.
+    let mut senders = BTreeSet::new();
+    for name in ["First", "Second"] {
+        let body = format!(r#"{{"name":"{name}"}}"#);
+        let revision: i64 = query_scalar("SELECT authority_revision FROM instance_settings")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+        let response = app
+            .clone()
+            .oneshot(signed_request(&admin, "POST", "/teams", &body, revision))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let envelope: keycast_core::v2::control::EncryptedReply = serde_json::from_slice(
+            &to_bytes(response.into_body(), MAX_AUTH_BODY_BYTES)
+                .await
+                .unwrap(),
+        )
+        .unwrap();
+        senders.insert(envelope.public_key.clone());
+        let plain = nostr::nips::nip44::decrypt(
+            admin.secret_key(),
+            &pinned,
+            &envelope.encrypted_response,
+        )
+        .expect("reply authenticates under the pinned identity");
+        let reply: keycast_core::v2::control::HttpReply = serde_json::from_str(&plain).unwrap();
+        assert_eq!(reply.status, StatusCode::CREATED.as_u16());
+    }
+    assert_eq!(senders, BTreeSet::from([published]));
+
+    // A reply forged by anyone else, including the API, fails to authenticate.
+    let forged = nostr::nips::nip44::encrypt(
+        Keys::generate().secret_key(),
+        &admin.public_key(),
+        r#"{"status":201,"body":"forged"}"#,
+        nostr::nips::nip44::Version::default(),
+    )
+    .unwrap();
+    assert!(nostr::nips::nip44::decrypt(admin.secret_key(), &pinned, &forged).is_err());
+    env::remove_var("ALLOWED_PUBKEYS");
+}

@@ -22,11 +22,12 @@ pub enum SignerClientError {
     Rejected { code: String, message: String },
 }
 impl SignerClient {
+    /// Taken by value: cloning would duplicate imported private material.
     pub async fn request(
         &self,
-        request: &LifecycleRequest,
+        request: LifecycleRequest,
     ) -> Result<ControlResponse, SignerClientError> {
-        match crate::control::dispatch_lifecycle(&self.runtime, request.clone()).await {
+        match crate::control::dispatch_lifecycle(&self.runtime, request).await {
             ControlResponse::Error { code, message } => {
                 Err(SignerClientError::Rejected { code, message })
             }

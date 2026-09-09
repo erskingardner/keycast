@@ -2,7 +2,8 @@
 set -euo pipefail
 umask 077
 
-KEY_FILE="master.key"
+# init.sh sets this when state lives outside the checkout.
+KEY_FILE="${KEYCAST_ROOT_KEY_PATH:-master.key}"
 
 # Never offer an overwrite shortcut: replacing this file makes every stored key undecryptable.
 if [ -f "$KEY_FILE" ]; then
@@ -10,7 +11,8 @@ if [ -f "$KEY_FILE" ]; then
     exit 1
 fi
 
-temporary_key=$(mktemp "./.keycast-root.XXXXXX")
+key_directory="$(cd "$(dirname "$KEY_FILE")" && pwd)"
+temporary_key=$(mktemp "$key_directory/.keycast-root.XXXXXX")
 trap 'rm -f "$temporary_key"' EXIT
 
 # Generate a 32-byte (256-bit) random key using openssl and base64 encode it

@@ -37,11 +37,14 @@ impl TeamRole {
     }
 }
 
+/// `Secret` keeps the imported private key out of `Debug` output and erases its
+/// buffer on drop. Intermediate copies inside the HTTP and JSON layers cannot be
+/// erased from here, so the trusted CLI remains the stronger import path.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct AddKeyRequest {
     pub name: String,
-    pub secret_key: String,
+    pub secret_key: keycast_core::v2::secret::Secret,
 }
 
 #[derive(Debug, Deserialize)]

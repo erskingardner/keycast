@@ -23,6 +23,9 @@
         onRemoved,
     }: { id: string; pubkey: string; onRemoved?: () => void | Promise<void> } =
         $props();
+    // A crafted link can put anything in the route parameter, which would then be
+    // signed into the `u` tag of an approval the operator is asked to confirm.
+    const invalidPubkey = $derived(!/^[0-9a-f]{64}$/.test(pubkey));
     let addingGrant = $state(false);
     let started = $state(false);
     const api = new KeycastApi();
@@ -36,7 +39,7 @@
     let loadError: string | null = $state(null);
 
     $effect(() => {
-        if (!user?.pubkey || started) return;
+        if (!user?.pubkey || started || invalidPubkey) return;
         started = true;
         void load();
     });
@@ -204,7 +207,14 @@
     }
 </script>
 
-{#if isLoading}
+{#if invalidPubkey}
+    <div role="alert">
+        <p class="input-error">
+            That is not a valid Nostr public key. Open the key from your
+            workspace instead of following the link.
+        </p>
+    </div>
+{:else if isLoading}
     <Loader />
 {:else if loadError}
     <div role="alert">

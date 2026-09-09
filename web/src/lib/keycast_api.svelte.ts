@@ -1,7 +1,13 @@
 import { generateSecretKey, getPublicKey } from "nostr-tools/pure";
 import { v2 as nip44 } from "nostr-tools/nip44";
 import { sha256Hex } from "./utils/http_auth";
-import { MANAGEMENT_KIND, MANAGEMENT_READ_KIND, managementDescription } from "./utils/management";
+import {
+    MANAGEMENT_KIND,
+    MANAGEMENT_READ_KIND,
+    containsSecretMarker,
+    managementDescription,
+} from "./utils/management";
+import { verifyManagementReplyKey } from "./utils/reply_identity";
 import type { EventTemplate, NostrEvent } from "applesauce-core/helpers";
 import { getContext, setContext } from "svelte";
 import { signNostrEvent } from "./nostr";
@@ -13,7 +19,10 @@ import {
 
 export class KeycastApi {
     private baseUrl: string;
-    private pending = new Map<string, { secret: Uint8Array; created: number }>();
+    private pending = new Map<
+        string,
+        { secret: Uint8Array; created: number; replyKey: string }
+    >();
     private defaultHeaders: HeadersInit;
 
     constructor() {
@@ -46,7 +55,15 @@ export class KeycastApi {
             response = await fetch(url, { ...options, headers, signal: options.signal ?? AbortSignal.timeout(20000) });
             if (pending && response.ok) {
                 const envelope = await response.json() as { encrypted_response: string; public_key: string };
-                const plaintext = nip44.decrypt(envelope.encrypted_response, nip44.utils.getConversationKey(pending.secret, envelope.public_key));
+                // Decrypt against the identity pinned when the approval was signed,
+                // never the one the response claims: that is what makes NIP-44
+                // authenticate the sender rather than merely hide the reply.
+                if (envelope.public_key !== pending.replyKey) {
+                    throw new Error(
+                        "The management reply came from an unexpected identity. Compare the reply identity on the Status page with your host before retrying.",
+                    );
+                }
+                const plaintext = nip44.decrypt(envelope.encrypted_response, nip44.utils.getConversationKey(pending.secret, pending.replyKey));
                 const reply = JSON.parse(plaintext) as { status: number; body: string };
                 response = new Response(reply.status === 204 ? null : reply.body, { status: reply.status });
             }
@@ -142,14 +159,24 @@ export class KeycastApi {
         const write = method !== "GET";
         const unsignedAuthEvent = await this.buildUnsignedAuthEvent(url, method, body);
         let responseSecret: Uint8Array | undefined;
-        const config = await this.get<{ instance_id: string; authority_revision: number }>("/config", { params: { pubkey } });
+        const config = await this.get<{ instance_id: string; authority_revision: number; management_reply_public_key: string }>("/config", { params: { pubkey } });
         if (!config.instance_id || !Number.isSafeInteger(config.authority_revision)) throw new Error("Signer management configuration is unavailable");
         unsignedAuthEvent.tags.push(["instance", config.instance_id]);
+        let replyKey = "";
         if (write) {
+            replyKey = verifyManagementReplyKey(config.management_reply_public_key);
             responseSecret = generateSecretKey();
             const nonce = Array.from(crypto.getRandomValues(new Uint8Array(32)), b => b.toString(16).padStart(2,"0")).join("");
             unsignedAuthEvent.kind = MANAGEMENT_KIND;
             unsignedAuthEvent.content = managementDescription(method, url, body ?? "");
+            // Refuse before asking the key store to sign. The approval is shown by,
+            // stored in, and for NIP-46 relayed to an external signer.
+            if (containsSecretMarker(unsignedAuthEvent.content)) {
+                responseSecret.fill(0);
+                throw new Error(
+                    "This change cannot be approved because its description would contain private key material. Remove the key material from the name and try again.",
+                );
+            }
             unsignedAuthEvent.tags = unsignedAuthEvent.tags.filter(t => t[0] !== "payload");
             unsignedAuthEvent.tags.push(["payload", await sha256Hex(body ?? "")], ["revision", String(config.authority_revision)], ["nonce", nonce], ["response", getPublicKey(responseSecret)]);
         }
@@ -163,7 +190,7 @@ export class KeycastApi {
                 }
             }
             if (responseSecret) {
-                this.pending.set(header,{secret:responseSecret,created:Date.now()});
+                this.pending.set(header,{secret:responseSecret,created:Date.now(),replyKey});
                 setTimeout(() => { const value = this.pending.get(header); if (value) { value.secret.fill(0); this.pending.delete(header); } }, 120000);
             }
             return header;

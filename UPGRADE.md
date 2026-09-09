@@ -11,7 +11,8 @@ Plan a short maintenance window, re-import every key, and reconnect every client
    material into notes.
 3. Optionally archive `database/keycast.db` and the old `master.key` for rollback to V1. They are
    not needed by V2.
-4. Make sure the external `keycast` Docker network and reverse proxy are available.
+4. Make sure the external `keycast` Docker network and reverse proxy are available. The network is
+   now created with `--internal`; see "Hardening migration" below if yours already exists.
 
 ## Replace V1
 
@@ -21,12 +22,13 @@ Stop the old deployment:
 sudo docker compose down
 ~~~
 
-Keep any legacy files as an offline archive if desired:
+Keep any legacy files as an offline archive if desired. Move them **outside** the checkout: a root
+key inside the repository would be copied into the Docker build context by a source build.
 
 ~~~sh
-mkdir -p legacy-v1
-mv database/keycast.db* legacy-v1/ 2>/dev/null || true
-mv master.key legacy-v1/master.key 2>/dev/null || true
+sudo install -d -m 0700 /srv/keycast-legacy-v1
+sudo mv database/keycast.db* /srv/keycast-legacy-v1/ 2>/dev/null || true
+sudo mv master.key /srv/keycast-legacy-v1/master.key 2>/dev/null || true
 ~~~
 
 Create the v2 configuration and a fresh root credential:
@@ -78,11 +80,111 @@ V1 rollback requires the archived V1 database and its matching old root key. Sto
 restoring them. V2 changes made after the cutover do not exist in V1 and cannot be converted back.
 Do not mix a database with a different root credential.
 
+## Hardening migration
+
+These changes tighten the shipped defaults and need one deliberate step each on an existing
+deployment.
+
+**The `keycast` network is now internal.** The API and web containers no longer have a route off
+the host; the signer gets its own egress network. Recreate the network once:
+
+~~~sh
+sudo docker compose -f docker-compose.prod.yml down
+sudo docker compose -f caddy-docker-compose-example.yml down
+sudo docker network rm keycast
+sudo docker network create --internal keycast
+~~~
+
+**The reverse proxy no longer needs the Docker socket.** The previous example mounted
+`/var/run/docker.sock` into Caddy, which is root-equivalent on the host: read-only applies to the
+socket file, not to the Docker API commands sent over it. The proxy now uses a static file, and the
+`caddy=` labels have been removed from both Compose files. Prepare and review that file before
+starting anything:
+
+~~~sh
+cp Caddyfile.example Caddyfile
+~~~
+
+Then bring the whole stack back up and confirm it is healthy:
+
+~~~sh
+sudo docker compose -f docker-compose.prod.yml up -d
+sudo docker compose -f caddy-docker-compose-example.yml up -d
+sudo docker compose -f docker-compose.prod.yml ps
+~~~
+
+**Management writes now pin a reply identity.** The signer derives a stable reply keypair from the
+root credential and publishes its public half through `/api/config`. Your browser pins it on first
+use. After a root-credential rotation the identity changes, so the Status page shows a warning with
+both fingerprints and a button to trust the new one. Compare it against the host first:
+
+~~~sh
+sudo docker compose -f docker-compose.prod.yml exec -T keycast-signer \
+  /app/keycast_signer status | python3 -m json.tool | grep management_reply
+~~~
+
+**Swap is now disabled for the containers.** `memswap_limit` matches `mem_limit` so decrypted key
+material cannot be paged to host swap. No action needed, but confirm the host has enough RAM.
+
+**State can now live outside the checkout.** `KEYCAST_STATE_DIR` moves the runtime database and
+`master.key` away from the working tree, so a `git` operation or a source build can never reach
+them. It defaults to the checkout, so existing deployments are unaffected.
+
+Move the database *files*, not the `database/` directory: `database/migrations` is tracked source
+that both the image build and the Rust tests read, and relocating it breaks them. The signer reads
+migrations from inside the image, so the external directory holds only the database.
+
+The move runs inside one privileged shell. `database/` is mode `0700` owned by UID 10001, so an
+ordinary operator's shell cannot list it to expand the wildcard: bash would pass the literal
+`database/keycast-v2.db*` to `mv` and zsh would refuse outright, and the credential move and `.env`
+edit that follow would still succeed, leaving the database behind and the signer pointed at an empty
+directory. Running the whole move under `sudo bash -euc` expands the glob with the right privileges
+and stops at the first failure.
+
+~~~sh
+sudo docker compose -f docker-compose.prod.yml down
+sudo install -d -m 0700 -o 10001 -g 10001 /srv/keycast /srv/keycast/database
+sudo bash -euc '
+  shopt -s nullglob
+  database=(database/keycast-v2.db*)
+  (( ${#database[@]} )) || { echo "no keycast-v2.db found to move"; exit 1; }
+  mv -- "${database[@]}" /srv/keycast/database/
+  mv -- master.key /srv/keycast/
+  echo "KEYCAST_STATE_DIR=/srv/keycast" >> .env
+'
+~~~
+
+Stale `database/keycast-v2.*.lock` files can be deleted; the signer recreates them. Then validate
+and restart:
+
+~~~sh
+sudo scripts/upgrade_preflight.sh --fix-permissions
+sudo docker compose -f docker-compose.prod.yml up -d
+sudo docker compose -f docker-compose.prod.yml ps
+~~~
+
+Confirm the signer reports schema version 2 and your existing keys on the **Status** page before
+deleting anything from the old location.
+
+`scripts/init.sh --state-dir /srv/keycast` sets this up for a fresh install, and the preflight
+resolves the same path so it never validates a stale copy.
+
 ## Future V2 Upgrades
 
 Once on v2, preserve `database/keycast-v2.db` and `master.key` together, pin all three images to
-reviewed per-image SHA-256 digests, run `scripts/upgrade_preflight.sh`, pull, and restart. Review release
+per-image SHA-256 digests, run `scripts/upgrade_preflight.sh`, pull, and restart. Review release
 notes for schema changes before every upgrade.
+
+A digest pins only what you already trust, so verify provenance before pinning one. The publish
+workflow attests each image and prints the digests in its run summary:
+
+~~~sh
+gh attestation verify oci://ghcr.io/marmot-protocol/keycast-signer@sha256:... \
+  --repo marmot-protocol/keycast
+~~~
+
+`scripts/upgrade_preflight.sh` performs this check for all three images when `gh` is installed, and
+fails when an image has no verifiable provenance.
 
 The September 5 prerelease authority schema deliberately invalidates earlier V2 migration checksums.
 Choose a fresh development database; no automatic deletion or V1 conversion is performed.

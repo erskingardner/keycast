@@ -102,6 +102,7 @@ export type SignerStatus = {
     schema_version: number;
     envelope_version: number;
     credential_key_id: string | null;
+    management_reply_public_key: string | null;
     active_grants: number;
     active_sessions: number;
     claimable_invitations: number;

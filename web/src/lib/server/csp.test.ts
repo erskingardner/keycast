@@ -17,16 +17,36 @@ describe("configured API content security policy", () => {
     });
     test("keeps production upgrade policy and never leaks local origins between configurations", () => {
         createCspDirectives("http://localhost:3101");
-        for (const api of [undefined, "https://keycast.example"]) {
-            const policy = createCspDirectives(api);
-            expect(policy["upgrade-insecure-requests"]).toBe(true);
-            expect(policy["connect-src"]).toEqual([
-                "self",
-                "https:",
-                "wss:",
-                "ws:",
-            ]);
-        }
+        const policy = createCspDirectives(undefined);
+        expect(policy["upgrade-insecure-requests"]).toBe(true);
+        expect(policy["connect-src"]).toEqual(["self", "wss:"]);
+        expect(policy["img-src"]).not.toContain("http:");
+    });
+    test("permits a split-origin HTTPS API without restoring a blanket https: source", () => {
+        // Without this the UI cannot reach /config or any management endpoint
+        // when the API is served from a different origin.
+        const policy = createCspDirectives("https://api.keycast.example/api");
+        expect(policy["connect-src"]).toEqual([
+            "self",
+            "wss:",
+            "https://api.keycast.example",
+        ]);
+        expect(policy["connect-src"]).not.toContain("https:");
+        // HTTPS keeps the upgrade directive; only loopback HTTP drops it.
+        expect(policy["upgrade-insecure-requests"]).toBe(true);
+        // A same-origin API is already covered by 'self' and is not duplicated.
+        const sameOrigin = createCspDirectives("https://keycast.example/api");
+        const sources = sameOrigin["connect-src"];
+        expect(Array.isArray(sources)).toBe(true);
+        expect(
+            (sources as string[]).filter(
+                (source: string) => source === "https://keycast.example",
+            ),
+        ).toHaveLength(1);
+        // Configurations must not leak into one another.
+        expect(createCspDirectives("https://other.example")["connect-src"]).not.toContain(
+            "https://api.keycast.example",
+        );
     });
     test("rejects HTTP origins that only resemble loopback", () => {
         for (const api of [

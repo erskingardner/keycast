@@ -174,7 +174,9 @@ Set `KEYCAST_DATABASE_PATH`, `KEYCAST_ROOT_KEY_FILE`, `KEYCAST_MIGRATIONS_PATH`,
 and `RCLONE_CONFIG` in the private host environment file. With Docker, set `signer_command` to an
 argument array for `docker compose run --rm --no-deps -T` with the signer service and explicit backup
 key/directory mounts. Those paths must resolve identically to the paths in the job configuration.
-Set `status_command` to `docker compose exec -T signer /app/keycast_signer`. The example service assumes
+Set `status_command` to `docker compose exec -T keycast-signer /app/keycast_signer`. Note that this
+requires the `keycast` user to be in the `docker` group, which is root-equivalent on the host and
+undoes the systemd sandboxing; prefer a host binary. The example service assumes
 a host binary; adapt its account and filesystem permissions to the actual deployment. Docker access
 is trusted host administration, not an additional security boundary.
 

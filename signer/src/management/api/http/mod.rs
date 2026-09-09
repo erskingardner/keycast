@@ -32,6 +32,9 @@ pub struct PublicConfig {
     pub pubkey_allowed: bool,
     pub instance_id: String,
     pub authority_revision: i64,
+    /// Stable identity that encrypts management replies. A browser pins this and
+    /// refuses a reply from any other sender, so the API cannot forge outcomes.
+    pub management_reply_public_key: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize)]
@@ -118,14 +121,25 @@ pub async fn auth_middleware(
         return next.run(request).await;
     }
     let body_text = std::str::from_utf8(&body_bytes).unwrap_or("");
-    if keycast_core::v2::management::description(
+    let described = keycast_core::v2::management::description(
         request.method().as_str(),
         request.uri().path(),
         body_text,
-    )
-    .as_deref()
-        != Some(&event.content)
+    );
+    // Fail closed before matching. An approval event is displayed by, stored in,
+    // and for NIP-46 signers transported to an external key store, so private
+    // material must never reach one even if a route or the frontend regresses.
+    if described
+        .as_deref()
+        .is_some_and(keycast_core::v2::management::contains_secret_marker)
+        || keycast_core::v2::management::contains_secret_marker(&event.content)
     {
+        return response_with_status(
+            StatusCode::BAD_REQUEST,
+            "Approval content must not contain private key material",
+        );
+    }
+    if described.as_deref() != Some(event.content.as_str()) {
         return response_with_status(
             StatusCode::UNAUTHORIZED,
             "Approval contents do not match the command",
@@ -182,9 +196,17 @@ pub async fn auth_middleware(
         status,
         body: String::from_utf8_lossy(&bytes).into_owned(),
     };
-    let keys = Keys::generate();
+    // A fresh key per reply left NIP-44 with nothing to authenticate: anyone
+    // holding the public `response` pubkey could forge a reply. The stable
+    // root-derived identity makes NIP-44 authenticate the sender.
+    let Ok(reply_keys) = state.signer.runtime.store.cipher.management_reply_keys() else {
+        return response_with_status(
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Management reply identity unavailable",
+        );
+    };
     let encrypted = nostr::nips::nip44::encrypt(
-        keys.secret_key(),
+        reply_keys.secret_key(),
         &recipient,
         serde_json::to_string(&reply).unwrap(),
         nostr::nips::nip44::Version::default(),
@@ -193,7 +215,7 @@ pub async fn auth_middleware(
     match encrypted {
         Ok(encrypted_response) => Json(keycast_core::v2::control::EncryptedReply {
             encrypted_response,
-            public_key: keys.public_key().to_hex(),
+            public_key: reply_keys.public_key().to_hex(),
         })
         .into_response(),
         Err(_) => response_with_status(
@@ -213,10 +235,18 @@ pub async fn public_config(
     .fetch_one(&state.db)
     .await
     .map_err(|_| StatusCode::SERVICE_UNAVAILABLE)?;
+    let management_reply_public_key = state
+        .signer
+        .runtime
+        .store
+        .cipher
+        .management_reply_public_key()
+        .ok_or(StatusCode::SERVICE_UNAVAILABLE)?;
     Ok(Json(PublicConfig {
         pubkey_allowed: is_allowed_pubkey_hex(&query.pubkey),
         instance_id,
         authority_revision,
+        management_reply_public_key,
     }))
 }
 
@@ -470,8 +500,9 @@ mod tests {
 
     use super::*;
     use axum::http::Method;
-    use sqlx::{query::query, query_scalar::query_scalar, raw_sql::raw_sql};
+    use sqlx::{query::query, query_as::query_as, query_scalar::query_scalar, raw_sql::raw_sql};
     use sqlx_sqlite::{SqlitePool, SqlitePoolOptions};
+    use std::collections::BTreeSet;
 
     use std::sync::Mutex;
     use tower::ServiceExt;

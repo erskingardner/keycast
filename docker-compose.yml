@@ -2,10 +2,13 @@ x-keycast-hardening: &keycast-hardening
   user: "10001:10001"
   read_only: true
   tmpfs:
-    - /tmp:size=64m,mode=1777
+    - /tmp:size=64m,mode=1777,noexec,nosuid,nodev
   init: true
   pids_limit: 128
   mem_limit: 512m
+  # Equal to mem_limit: disables swap for the cgroup so decrypted key material
+  # cannot be paged to host swap, which would outlive the container.
+  memswap_limit: 512m
   stop_grace_period: 30s
   security_opt:
     - no-new-privileges:true
@@ -17,8 +20,6 @@ x-keycast-hardening: &keycast-hardening
       soft: 4096
       hard: 4096
   restart: unless-stopped
-  networks:
-    - keycast
   logging:
     driver: json-file
     options:
@@ -33,13 +34,18 @@ services:
   keycast-signer:
     <<: *keycast-hardening
     container_name: keycast-signer
+    # Reachable by nothing: the API talks to it only over the socket volume.
+    networks:
+      - keycast-signer-egress
     build:
       <<: *rust-build
       target: signer-runtime
     volumes:
-      - ./database:/app/database:rw
+      # Set KEYCAST_STATE_DIR to keep persistent state and the root credential
+      # outside the checkout, e.g. /srv/keycast. Defaults to the checkout.
+      - ${KEYCAST_STATE_DIR:-.}/database:/app/database:rw
       - keycast-runtime:/run/keycast:rw
-      - ./master.key:/run/secrets/keycast-root-key:ro
+      - ${KEYCAST_STATE_DIR:-.}/master.key:/run/secrets/keycast-root-key:ro
     environment:
       RUST_LOG: info,keycast_signer=info
       ALLOWED_PUBKEYS: "${ALLOWED_PUBKEYS:?error}"
@@ -55,6 +61,8 @@ services:
   keycast-api:
     <<: *keycast-hardening
     container_name: keycast-api
+    networks:
+      - keycast
     build:
       <<: *rust-build
       target: api-runtime
@@ -74,13 +82,12 @@ services:
       timeout: 6s
       retries: 3
       start_period: 10s
-    labels:
-      - "caddy=${DOMAIN:?error}"
-      - "caddy.reverse_proxy=/api/* {{upstreams 3000}}"
 
   keycast-web:
     <<: *keycast-hardening
     container_name: keycast-web
+    networks:
+      - keycast
     build:
       context: .
       target: web-runtime
@@ -102,14 +109,17 @@ services:
       timeout: 6s
       retries: 3
       start_period: 10s
-    labels:
-      - "caddy=${DOMAIN:?error}"
-      - "caddy.reverse_proxy=/* {{upstreams 5173}}"
 
 networks:
+  # Created by scripts/init.sh as an internal network: api and web have no route
+  # off-host, so a compromise of the public transport cannot exfiltrate outward.
+  # The reverse proxy joins this network and keeps its own egress network.
   keycast:
     external: true
     name: keycast
+  # Only the signer needs outbound access, for relay connections.
+  keycast-signer-egress:
+    driver: bridge
 
 volumes:
   keycast-runtime:

@@ -17,7 +17,7 @@ common=(--detach --read-only --user 10001:10001 --cap-drop ALL --security-opt no
 docker run "${common[@]}" --name "$smoke_id-signer" --network-alias signer -v "$smoke_id-db:/app/database" -v "$smoke_id-runtime:/run/keycast" -v "$smoke_id-root:/run/secrets:ro" -e KEYCAST_ROOT_KEY_FILE=/run/secrets/root.key -e KEYCAST_PUBLIC_URL=https://keycast.test/api -e ALLOWED_PUBKEYS="$operator" -e KEYCAST_OPERATOR_PUBKEYS="$operator" keycast-hardening-signer:local >/dev/null
 docker run "${common[@]}" --name "$smoke_id-api" --network-alias api -v "$smoke_id-runtime:/run/keycast:ro" keycast-hardening-api:local >/dev/null
 docker run "${common[@]}" --name "$smoke_id-web" --network-alias web -e ORIGIN=https://keycast.test keycast-hardening-web:local >/dev/null
-for attempt in $(seq 1 30); do
+for _ in $(seq 1 30); do
   if docker exec "$smoke_id-signer" /app/keycast_signer healthcheck >/dev/null 2>&1 && docker exec "$smoke_id-api" /app/keycast_api healthcheck >/dev/null 2>&1; then break; fi
   sleep 1
 done

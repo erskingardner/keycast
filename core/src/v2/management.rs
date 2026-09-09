@@ -31,18 +31,35 @@ pub fn approval_context(event: &Event, instance: &str, revision: i64) -> Option<
     PublicKey::from_hex(exact_tag(event, "response")?).ok()
 }
 
+/// Substrings that must never reach an approval event an external signer
+/// displays, stores, or transports over relays.
+const SECRET_MARKERS: [&str; 2] = ["secret_key", "nsec1"];
+
+/// Deserializing only the name lets serde skip the private field without
+/// allocating it, unlike parsing the whole body into a `Value`.
+#[derive(serde::Deserialize)]
+struct ImportedKeyName {
+    name: String,
+}
+
 /// Human-readable, verified command contents for the external approval screen.
 /// Private import material must never be copied into an approval event.
 pub fn description(method: &str, path: &str, body: &str) -> Option<String> {
     if method == "POST" && path.split('?').next()?.ends_with("/keys") {
-        let value: serde_json::Value = serde_json::from_str(body).ok()?;
-        Some(format!(
-            "Import private key named {}",
-            value.get("name")?.as_str()?
-        ))
+        let request: ImportedKeyName = serde_json::from_str(body).ok()?;
+        Some(format!("Import private key named {}", request.name))
     } else {
         Some(body.to_owned())
     }
+}
+
+/// Fail closed instead of letting a route echo private material into an approval.
+/// Guards both the redacted import summary and any future write whose body is echoed.
+pub fn contains_secret_marker(content: &str) -> bool {
+    let lowered = content.to_ascii_lowercase();
+    SECRET_MARKERS
+        .iter()
+        .any(|marker| lowered.contains(*marker))
 }
 
 #[cfg(test)]
@@ -55,6 +72,48 @@ mod tests {
             .finalize(&Keys::generate())
             .unwrap()
     }
+    /// The browser refuses to sign first, so a marker present only here would let
+    /// content the signer rejects still reach an external key store. The list is
+    /// read from the TypeScript source rather than duplicated in this test.
+    #[test]
+    fn secret_markers_match_the_browser_list() {
+        let typescript = include_str!("../../../web/src/lib/utils/management.ts");
+        let declaration = typescript
+            .lines()
+            .find(|line| line.contains("const SECRET_MARKERS"))
+            .expect("web/src/lib/utils/management.ts declares SECRET_MARKERS");
+        let browser: Vec<&str> = declaration.split('"').skip(1).step_by(2).collect();
+        assert_eq!(
+            browser, SECRET_MARKERS,
+            "the browser and signer marker lists have diverged"
+        );
+    }
+
+    #[test]
+    fn import_description_names_the_key_without_its_private_material() {
+        let body = r#"{"name":"Personal identity","secret_key":"nsec1exampleprivatematerial"}"#;
+        let description = description("POST", "/teams/1/keys", body).unwrap();
+        assert_eq!(description, "Import private key named Personal identity");
+        assert!(!description.contains("nsec1"));
+        assert!(!contains_secret_marker(&description));
+    }
+
+    #[test]
+    fn secret_markers_are_detected_in_echoed_bodies_and_pasted_names() {
+        // A future route that echoes its body must not ship private material.
+        let echoed = description("PUT", "/teams/1", r#"{"secret_key":"nsec1abc"}"#).unwrap();
+        assert!(contains_secret_marker(&echoed));
+        // An operator pasting a private key into the name field is caught too.
+        let pasted = description(
+            "POST",
+            "/teams/1/keys",
+            r#"{"name":"NSEC1abc","secret_key":"x"}"#,
+        )
+        .unwrap();
+        assert!(contains_secret_marker(&pasted));
+        assert!(!contains_secret_marker(r#"{"name":"Ops"}"#));
+    }
+
     #[test]
     fn approval_context_rejects_cross_instance_revision_and_ambiguous_tags() {
         let response = Keys::generate().public_key();

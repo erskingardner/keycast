@@ -1,27 +1,80 @@
+# Reverse proxy for a Keycast instance, using a static Caddyfile.
+#
+# This deliberately does NOT mount /var/run/docker.sock. A label-driven proxy
+# needs the Docker API, and that API is root-equivalent on the host even when the
+# socket is bind-mounted read-only: read-only applies to the socket file, not to
+# the commands sent over it. Caddy is the only process that parses untrusted
+# Internet traffic, so a compromise there would otherwise expose master.key, the
+# database, and the signer. Keycast has two fixed upstreams, so nothing is lost.
+#
+# Setup:
+#   cp Caddyfile.example Caddyfile      # then review it
+#   docker network create --internal keycast   # scripts/init.sh does this
+#   docker compose -f caddy-docker-compose-example.yml up -d
+#
+# Verify the pinned digest before trusting it:
+#   docker buildx imagetools inspect caddy:2.10-alpine
+
 services:
   caddy:
-    image: lucaslorentz/caddy-docker-proxy:2.13.1-alpine@sha256:3e6cf4a6382da0cd14108a69929d7f8cc59e9a59cae4c9795071fa392ffa8036
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    container_name: keycast-caddy
     ports:
-      - 80:80
-      - 443:443
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
     environment:
-      - CADDY_INGRESS_NETWORKS=keycast,strfry
+      DOMAIN: "${DOMAIN:?error}"
     volumes:
-      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - caddy_data:/data
+      - caddy_config:/config
     networks:
+      # Reaches keycast-api and keycast-web on the internal network, and the
+      # public network for ACME and published ports.
       - keycast
+      - keycast-ingress
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    init: true
+    pids_limit: 128
+    mem_limit: 256m
+    memswap_limit: 256m
+    stop_grace_period: 30s
     security_opt:
       - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      # Binding 80 and 443 is the only privilege this needs.
+      - NET_BIND_SERVICE
+    ulimits:
+      core: 0
+      nofile:
+        soft: 8192
+        hard: 8192
     restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+        compress: "true"
+    healthcheck:
+      test: ["CMD", "caddy", "version"]
+      interval: 30s
+      timeout: 6s
+      retries: 3
+      start_period: 10s
 
 networks:
   keycast:
     external: true
     name: keycast
-  strfry:
-    external: true
-    name: strfry
+  keycast-ingress:
+    driver: bridge
 
 volumes:
   caddy_data:
+  caddy_config:

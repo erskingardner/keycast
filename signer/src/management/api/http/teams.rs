@@ -109,8 +109,18 @@ pub async fn delete_team(
 ) -> ApiResult<StatusCode> {
     let actor = event.pubkey.to_hex();
     require_admin(&state.db, id, &actor).await?;
-    let mut transaction = state.db.begin().await?;
+    let mut transaction = state.db.begin_with("BEGIN IMMEDIATE").await?;
     audit_control(&mut transaction, id, &actor, "team.delete", "succeeded").await?;
+    // `grants` references `policies` with ON DELETE RESTRICT while `policies`
+    // cascades from `teams`, so deleting the team aborts unless its grants go
+    // first. Revocation is a tombstone rather than a row delete, so even a fully
+    // revoked team would otherwise be undeletable. Deleting the grants cascades
+    // their invitations, sessions and durable requests; audit rows survive with
+    // their team and grant links cleared.
+    query("DELETE FROM grants WHERE team_id = ?")
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
     let result = query("DELETE FROM teams WHERE id = ?")
         .bind(id)
         .execute(&mut *transaction)
@@ -119,7 +129,7 @@ pub async fn delete_team(
         return Err(ApiError::NotFound);
     }
     transaction.commit().await?;
-    state.signer.request(&LifecycleRequest::Reload).await?;
+    state.signer.request(LifecycleRequest::Reload).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -217,7 +227,7 @@ pub async fn add_key(
     require_admin(&state.db, id, &event.pubkey.to_hex()).await?;
     let response = state
         .signer
-        .request(&LifecycleRequest::SealStoredKey {
+        .request(LifecycleRequest::SealStoredKey {
             team_id: id,
             actor_public_key: event.pubkey.to_hex(),
             name: request.name,
@@ -258,7 +268,7 @@ pub async fn remove_key(
     )
     .await?;
     transaction.commit().await?;
-    state.signer.request(&LifecycleRequest::Reload).await?;
+    state.signer.request(LifecycleRequest::Reload).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -405,7 +415,7 @@ pub async fn update_policy(
     }
     audit_control(&mut transaction, id, &actor, "policy.update", "succeeded").await?;
     transaction.commit().await?;
-    state.signer.request(&LifecycleRequest::Reload).await?;
+    state.signer.request(LifecycleRequest::Reload).await?;
     Ok(Json(policy(&state.db, id, policy_id).await?))
 }
 
@@ -454,7 +464,7 @@ pub async fn add_grant(
     let stored_key = stored_key_by_pubkey(&state.db, id, &pubkey).await?;
     let response = state
         .signer
-        .request(&LifecycleRequest::CreateGrant {
+        .request(LifecycleRequest::CreateGrant {
             team_id: id,
             actor_public_key: event.pubkey.to_hex(),
             stored_key_id: stored_key.id,
@@ -485,7 +495,7 @@ pub async fn revoke_grant(
     require_grant_for_key(&state.db, id, &pubkey, grant_id).await?;
     match state
         .signer
-        .request(&LifecycleRequest::RevokeGrant {
+        .request(LifecycleRequest::RevokeGrant {
             grant_id,
             actor_public_key: event.pubkey.to_hex(),
         })
@@ -506,7 +516,7 @@ pub async fn create_invitation(
     require_grant_for_team(&state.db, id, grant_id).await?;
     match state
         .signer
-        .request(&LifecycleRequest::CreateInvitation {
+        .request(LifecycleRequest::CreateInvitation {
             grant_id,
             actor_public_key: event.pubkey.to_hex(),
             expires_at: request.expires_at,
@@ -546,7 +556,7 @@ pub async fn revoke_invitation(
     }
     match state
         .signer
-        .request(&LifecycleRequest::RevokeInvitation {
+        .request(LifecycleRequest::RevokeInvitation {
             invitation_id,
             actor_public_key: event.pubkey.to_hex(),
         })
@@ -657,7 +667,7 @@ pub async fn status(
         query_scalar("SELECT minimum_connected_relays FROM instance_settings WHERE singleton = 1")
             .fetch_one(&state.db)
             .await?;
-    match state.signer.request(&LifecycleRequest::Status).await? {
+    match state.signer.request(LifecycleRequest::Status).await? {
         ControlResponse::Status { status } => Ok(Json(StatusResponse {
             signer: status,
             database_ok,
@@ -749,7 +759,7 @@ pub async fn update_relays(
         .execute(&mut *transaction)
         .await?;
     transaction.commit().await?;
-    state.signer.request(&LifecycleRequest::Reload).await?;
+    state.signer.request(LifecycleRequest::Reload).await?;
 
     let rows: Vec<(
         i64,
@@ -1078,6 +1088,6 @@ pub async fn update_discovery_policy(
         .execute(&mut *tx)
         .await?;
     tx.commit().await?;
-    state.signer.request(&LifecycleRequest::Reload).await?;
+    state.signer.request(LifecycleRequest::Reload).await?;
     Ok(StatusCode::NO_CONTENT)
 }

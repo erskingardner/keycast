@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1.7
+# syntax=docker/dockerfile:1.20.0@sha256:26147acbda4f14c5add9946e2fd2ed543fc402884fd75146bd342a7f6271dc1d
 
 FROM rust:1.96.0-slim-bookworm@sha256:4732ca96fd086cb9be682050c3f0176288eebaac2b80aa2bcefccfaf198e1950 AS rust-builder
 WORKDIR /app
@@ -61,7 +61,7 @@ FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c
 LABEL org.opencontainers.image.source="https://github.com/marmot-protocol/keycast"
 RUN groupadd --system --gid 10001 keycast \
     && useradd --system --uid 10001 --gid keycast --home-dir /nonexistent --shell /usr/sbin/nologin keycast \
-    && install -d -o keycast -g keycast -m 0755 /app
+    && install -d -o root -g root -m 0755 /app
 WORKDIR /app
 COPY --chown=root:root --from=web-builder /app/build ./web
 COPY --chown=root:root --from=web-builder /app/package.json ./package.json

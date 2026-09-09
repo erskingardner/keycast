@@ -11,6 +11,12 @@
         WarningCircle,
     } from "phosphor-svelte";
     import { toast } from "svelte-hot-french-toast";
+    import {
+        isManagementReplyKey,
+        managementReplyFingerprint,
+        pinnedManagementReplyKey,
+        trustManagementReplyKey,
+    } from "$lib/utils/reply_identity";
 
     const api = new KeycastApi();
     const user = $derived(getCurrentUser()?.user);
@@ -21,9 +27,67 @@
     let minimumConnectedRelays = $state(1);
     let relayLines = $state("");
     let autoActivate = $state(false);
+    let pinnedReplyKey = $state<string | null>(null);
+    let publishedReplyKey = $state<string | null>(null);
+    let replyIdentityError = $state<string | null>(null);
+    // A mismatch means either a deliberate root rotation or a substituted key.
+    const replyKeyChanged = $derived(
+        !!publishedReplyKey &&
+            !!pinnedReplyKey &&
+            publishedReplyKey !== pinnedReplyKey,
+    );
 
     $effect(() => {
-        if (user?.pubkey) void refresh();
+        pinnedReplyKey = pinnedManagementReplyKey();
+    });
+
+    /**
+     * `/config` is unauthenticated, unlike `/status`, which requires an instance
+     * operator. A team administrator who may perform management writes but is not
+     * an operator would otherwise be blocked by a rotated identity with no way to
+     * see or re-trust the new one.
+     */
+    async function loadReplyIdentity() {
+        if (!user?.pubkey) return;
+        replyIdentityError = null;
+        try {
+            const config = await api.get<{
+                management_reply_public_key?: unknown;
+            }>("/config", { params: { pubkey: user.pubkey } });
+            publishedReplyKey = isManagementReplyKey(
+                config.management_reply_public_key,
+            )
+                ? config.management_reply_public_key
+                : null;
+            if (!publishedReplyKey) {
+                replyIdentityError =
+                    "The signer did not publish a management reply identity.";
+            }
+        } catch (error) {
+            publishedReplyKey = null;
+            replyIdentityError =
+                error instanceof Error
+                    ? error.message
+                    : "Could not load the management reply identity";
+        }
+    }
+
+    function trustReplyKey() {
+        if (!publishedReplyKey) return;
+        trustManagementReplyKey(publishedReplyKey);
+        pinnedReplyKey = publishedReplyKey;
+        toast.success("Management reply identity trusted");
+    }
+
+    async function refreshAll() {
+        await Promise.all([refresh(), loadReplyIdentity()]);
+    }
+
+    $effect(() => {
+        if (user?.pubkey) {
+            void refresh();
+            void loadReplyIdentity();
+        }
     });
 
     async function refresh() {
@@ -127,7 +191,7 @@
     </div>
     <button
         class="button button-secondary button-icon"
-        onclick={refresh}
+        onclick={refreshAll}
         disabled={isLoading}
     >
         <ArrowClockwise size="20" /> Refresh
@@ -137,6 +201,39 @@
 {#if loadError}<p class="input-error">
         {loadError}. Instance status requires an operator.
     </p>{/if}
+
+<div class="card mb-5" class:border-warning={replyKeyChanged}>
+    <h2 class="text-xl font-bold mb-2">Management reply identity</h2>
+    {#if replyIdentityError}
+        <p class="input-error">{replyIdentityError}</p>
+    {:else}
+        <p class="description">
+            Published by the signer: <code
+                >{publishedReplyKey
+                    ? managementReplyFingerprint(publishedReplyKey)
+                    : "loading"}</code
+            >
+        </p>
+        <p class="description">
+            Trusted by this browser: <code
+                >{pinnedReplyKey
+                    ? managementReplyFingerprint(pinnedReplyKey)
+                    : "nothing pinned yet"}</code
+            >
+        </p>
+    {/if}
+    {#if replyKeyChanged}
+        <p class="text-warning mt-3" role="alert">
+            This identity changed, so management writes are blocked. Run
+            <code>keycast_signer status</code> on your host and compare its
+            <code>management_reply_public_key</code>. Trust the new identity only
+            if you rotated the root credential yourself.
+        </p>
+        <button class="button button-danger mt-3" onclick={trustReplyKey}
+            >Trust this identity</button
+        >
+    {/if}
+</div>
 
 {#if isLoading && !status}
     <Loader />

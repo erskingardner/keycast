@@ -8,6 +8,12 @@ No further timed soaks are planned. The remaining reliability findings stay trac
 as follow-ups; completed soak evidence does not close independent review or recovery work.
 Fresh-install signing defaults are nos.lol, Primal and Damus; Ditto and Bucket are excluded.
 
+September 9 second review pass: the high and medium findings from the signer, web, crypto and
+deployment reviews are fixed and covered by tests. See the second-pass table in `AUDIT.md`.
+The container network is now internal and the reverse proxy no longer takes the Docker socket, so
+an existing deployment needs the one-time steps in the "Hardening migration" section of
+`UPGRADE.md`.
+
 Remaining deployment and independent validation work:
 
 - [ ] Independent review of management kind 27236, signer authorization, NIP-46, envelope encryption,
@@ -32,7 +38,9 @@ Remaining deployment and independent validation work:
   workload: `docs/RELAY_ROLLOUT_2026-09-08.md`.
 - [ ] Complete the VM key-operation matrix below, including encryption/decryption rather than signing alone.
 - [ ] Select off-host backup storage and enable the provided encrypted upload/verification/retention and age-monitoring jobs.
-- [ ] Configure host/proxy connection limits and connect the provided capacity/readiness monitor to an external alert receiver.
+- [ ] Connect the provided capacity/readiness monitor to an external alert receiver. Proxy body and
+  request limits now ship in `Caddyfile.example`; per-IP rate limits still need a Caddy plugin or
+  host firewall, because the API sees only the proxy's address.
 - [ ] Exercise management approvals with the intended external NIP-07/NIP-55/NIP-46 stores.
 - [ ] Evaluate Umbrel/StartOS only after the VM deployment has operating history.
 

@@ -7,9 +7,11 @@ ALLOWED_PUBKEYS=""
 OPERATOR_PUBKEYS=""
 KEYCAST_UID=10001
 KEYCAST_GID=10001
+STATE_DIR_ARG=""
 
 usage() {
-    echo "Usage: $0 --domain <domain> --allowed-pubkeys <hex[,hex...]> [--operator-pubkeys <hex[,hex...]>]"
+    echo "Usage: $0 --domain <domain> --allowed-pubkeys <hex[,hex...]> [--operator-pubkeys <hex[,hex...]>] [--state-dir <path>]"
+    echo "  --state-dir  Where the database and root credential live. Defaults to this checkout."
 }
 
 while [[ "$#" -gt 0 ]]; do
@@ -17,6 +19,7 @@ while [[ "$#" -gt 0 ]]; do
         --domain) DOMAIN="${2:-}"; shift 2 ;;
         --allowed-pubkeys) ALLOWED_PUBKEYS="${2:-}"; shift 2 ;;
         --operator-pubkeys) OPERATOR_PUBKEYS="${2:-}"; shift 2 ;;
+        --state-dir) STATE_DIR_ARG="${2:-}"; shift 2 ;;
         -h|--help) usage; exit 0 ;;
         *) echo "Unknown argument: $1"; usage; exit 1 ;;
     esac
@@ -46,19 +49,33 @@ if [[ -e .env ]]; then
     echo "Error: .env already exists; refusing to overwrite it"
     exit 1
 fi
-if [[ ! -f master.key ]]; then
-    bash scripts/generate_key.sh
+# Must match ${KEYCAST_STATE_DIR:-.} in the Compose files.
+if [[ -z "$STATE_DIR_ARG" ]]; then
+    STATE_DIR="$ROOT_DIR"
+elif [[ "$STATE_DIR_ARG" = /* ]]; then
+    STATE_DIR="$STATE_DIR_ARG"
+else
+    STATE_DIR="$ROOT_DIR/$STATE_DIR_ARG"
 fi
-mkdir -p database
-chmod 700 database
-chmod 600 master.key
-if ! chown -R "$KEYCAST_UID:$KEYCAST_GID" database master.key 2>/dev/null; then
+DATABASE_DIR="$STATE_DIR/database"
+ROOT_KEY="$STATE_DIR/master.key"
+mkdir -p "$STATE_DIR"
+if [[ ! -f "$ROOT_KEY" ]]; then
+    KEYCAST_ROOT_KEY_PATH="$ROOT_KEY" bash "$ROOT_DIR/scripts/generate_key.sh"
+fi
+mkdir -p "$DATABASE_DIR"
+chmod 700 "$DATABASE_DIR"
+chmod 600 "$ROOT_KEY"
+if ! chown -R "$KEYCAST_UID:$KEYCAST_GID" "$DATABASE_DIR" "$ROOT_KEY" 2>/dev/null; then
     echo "Warning: could not set container ownership."
-    echo "Run: sudo chown -R $KEYCAST_UID:$KEYCAST_GID database master.key"
+    echo "Run: sudo chown -R $KEYCAST_UID:$KEYCAST_GID $DATABASE_DIR $ROOT_KEY"
 fi
 
 {
     echo "DOMAIN=$DOMAIN"
+    if [[ "$STATE_DIR" != "$ROOT_DIR" ]]; then
+        echo "KEYCAST_STATE_DIR=$STATE_DIR"
+    fi
     echo "ALLOWED_PUBKEYS=$ALLOWED_PUBKEYS"
     echo "KEYCAST_OPERATOR_PUBKEYS=$OPERATOR_PUBKEYS"
     echo "KEYCAST_API_IMAGE=ghcr.io/marmot-protocol/keycast-api"
@@ -71,7 +88,16 @@ fi
 chmod 600 .env
 
 if command -v docker >/dev/null 2>&1; then
-    docker network inspect keycast >/dev/null 2>&1 || docker network create keycast >/dev/null
+    # Internal: keycast-api and keycast-web get no route off-host. The signer uses
+    # its own egress network and the reverse proxy keeps a public one.
+    if ! docker network inspect keycast >/dev/null 2>&1; then
+        docker network create --internal keycast >/dev/null
+    elif [ "$(docker network inspect keycast --format '{{.Internal}}' 2>/dev/null)" != "true" ]; then
+        echo "Warning: the existing 'keycast' network is not internal."
+        echo "To isolate the API and web containers, recreate it after stopping the stack:"
+        echo "  docker compose -f docker-compose.prod.yml down"
+        echo "  docker network rm keycast && docker network create --internal keycast"
+    fi
 fi
 
 echo "Keycast v2 initialized for $DOMAIN."

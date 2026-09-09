@@ -9,9 +9,34 @@ Group=keycast
 UMask=0077
 EnvironmentFile=/etc/keycast/host-operations.env
 ExecStart=/usr/bin/python3 /opt/keycast/scripts/operations/keycast_ops.py monitor /etc/keycast/operations.json
+TimeoutStartSec=15m
+
+# The monitor only reads status and checks backup freshness. Connecting to the
+# signer socket needs write access on the socket itself, nothing else.
+ReadWritePaths=/run/keycast
+ReadOnlyPaths=/srv/keycast
+
 NoNewPrivileges=yes
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/srv/keycast /run/keycast
-TimeoutStartSec=1h
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete

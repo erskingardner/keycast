@@ -11,7 +11,7 @@ use nostr_sdk::prelude::{Client, ClientNotification, StreamExt};
 use thiserror::Error;
 use tokio::sync::{watch, Notify};
 
-use crate::admission::{Admission, RelayCopies};
+use crate::admission::{Admission, Limits, RelayCopies};
 use crate::control::serve_control_socket;
 use crate::protocol::{recipient, validate_outer_event, RequestProcessor, RuntimeMetrics};
 use crate::store::{Store, StoreError};
@@ -31,6 +31,8 @@ pub struct RuntimeState {
     pub quarantined_grants: Arc<AtomicUsize>,
     pub reload: Arc<Notify>,
     pub last_progress: Arc<AtomicU64>,
+    /// Completed configuration refreshes, including the live-session index.
+    pub configuration_reloads: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Error)]
@@ -57,6 +59,7 @@ impl RuntimeState {
             quarantined_grants: Arc::new(AtomicUsize::new(0)),
             reload: Arc::new(Notify::new()),
             last_progress: Arc::new(AtomicU64::new(progress_tick())),
+            configuration_reloads: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -76,6 +79,7 @@ impl RuntimeState {
             schema_version: SCHEMA_VERSION,
             envelope_version: ENVELOPE_VERSION,
             credential_key_id: Some(self.store.cipher.key_id().to_string()),
+            management_reply_public_key: self.store.cipher.management_reply_public_key(),
             active_grants: grants,
             active_sessions: sessions,
             claimable_invitations: invitations,
@@ -232,8 +236,14 @@ pub async fn relay_supervisor(
     let mut prune = tokio::time::interval(Duration::from_secs(5));
     let mut maintenance = tokio::time::interval(Duration::from_secs(60));
     let mut integrity = tokio::time::interval(Duration::from_secs(3600));
-    let admission = Admission::default();
+    let admission = Admission::new(Limits::ESTABLISHED);
+    // Events from clients without a live session on the target grant, including
+    // every `connect`, draw from their own smaller lane.
+    let newcomers = Admission::new(Limits::NEWCOMER);
     let replay_validation = Admission::default();
+    // (remote signer pubkey, client pubkey) pairs with a live session, refreshed
+    // with the grant configuration. Bounded by the sessions capacity trigger.
+    let mut live_sessions = HashSet::<(String, String)>::new();
     let mut minimum = 1i64;
     let mut recovery_pending = false;
     let mut delivery_failure: Option<std::time::Instant> = None;
@@ -307,7 +317,16 @@ pub async fn relay_supervisor(
                                     telemetry.record(relay_url.as_str(), category);
                                     return Ok(true);
                                 }
-                                let ticket = match admission.try_admit_reason(&peer, &target.to_hex()) {
+                                // Choose the lane before spending any budget: a forged flood
+                                // addressed to a public remote-signer key must not be able to
+                                // exhaust the capacity that established sessions rely on.
+                                let target_hex = target.to_hex();
+                                let lane = if live_sessions.contains(&(target_hex.clone(), peer.clone())) {
+                                    &admission
+                                } else {
+                                    &newcomers
+                                };
+                                let ticket = match lane.try_admit_reason(&peer, &target_hex) {
                                     Ok(ticket) => ticket,
                                     Err(reason) => {
                                         state.metrics.ingress_rejections.fetch_add(1,Ordering::Relaxed);
@@ -408,6 +427,9 @@ pub async fn relay_supervisor(
                     completed = sqlx::query_scalar::query_scalar::<_, String>("SELECT event_id FROM processed_requests WHERE response_event_json IS NOT NULL ORDER BY received_at DESC LIMIT 10000")
                         .fetch_all(&state.store.pool).await?.into_iter().collect();
                     let grants = state.store.active_grants().await?;
+                    live_sessions = sqlx::query_as::query_as::<_, (String, String)>(
+                        "SELECT g.remote_signer_public_key,s.client_public_key FROM sessions s JOIN grants g ON g.id=s.grant_id WHERE s.ended_at IS NULL AND g.revoked_at IS NULL AND (g.expires_at IS NULL OR g.expires_at>unixepoch())")
+                        .fetch_all(&state.store.pool).await?.into_iter().collect();
                     let mut public_keys = BTreeSet::new();
                     let mut desired_keys = BTreeMap::<String,BTreeSet<PublicKey>>::new();
                     baseline=state.store.enabled_relays().await?.into_iter().map(|u|u.trim_end_matches('/').to_owned()).collect();
@@ -500,6 +522,7 @@ pub async fn relay_supervisor(
                             worker_events.insert(task.id(), worker_id);
                         }
                     }
+                    state.configuration_reloads.fetch_add(1, Ordering::Relaxed);
                 }
                 _ = discovery_tick.tick(), if discovery_jobs.is_empty() => {
                     let store=state.store.clone();

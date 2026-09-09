@@ -59,6 +59,116 @@ management-kind denial, stale grant claiming, unknown-client inbox protection, f
 and a real CLI backup/rotation/restore drill. The container smoke exercises signed HTTP management
 through the API and socket, browser import, and encrypted invitation creation.
 
+## Second review pass, September 9, 2026
+
+A further review covered the signer authorization router, NIP-46 pipeline, envelope and backup
+cryptography, the SvelteKit frontend, and the container/CI/operations layer. No critical or
+high-severity issue was found in application code. The findings below were fixed in this pass.
+
+| Priority | Finding | Fix |
+|---|---|---|
+| High | The shipped Caddy example mounted `/var/run/docker.sock`. Read-only applies to the socket file, not the Docker API sent over it, so code execution in the only Internet-facing process was root-equivalent on the host | Replaced with a static `Caddyfile.example` and a hardened proxy service: no socket, dropped capabilities, `read_only`, limits, and body limits for `/api/*`. The dead `caddy=` labels were removed |
+| Medium | Relay admission spent the shared per-second budget before verifying signatures or sessions. A remote-signer pubkey is public, so ~128 forged events per second on any shared relay could starve signing for every grant | Split admission into two lanes. Clients with a live session on the target grant draw from the established lane; everything else, including `connect`, draws from a smaller newcomer lane that cannot exhaust it. The live-session index refreshes with the grant configuration |
+| Medium | Management write replies were encrypted to a fresh per-reply key, so NIP-44 had nothing to authenticate. Anyone on path, including the untrusted API, could forge an outcome such as a `bunker://` URI pointing at their own signer | The signer derives a stable reply identity from the root credential and publishes its public half through `/config`. The browser pins it, decrypts only with the pinned key, and fails closed on a change. The Status page shows the fingerprint for comparison against `keycast_signer status` |
+| Medium | The NIP-46 sign-in popup opened a signer-supplied `auth_url` with an `opener` handle and no scheme check, so a malicious handshake relay could navigate the operator's tab mid sign-in | The URL must be `https:`, the popup is opened with `noopener,noreferrer`, and `Cross-Origin-Opener-Policy: same-origin` is set |
+| Medium | One flat bridge network gave the API and web containers unused Internet egress and placed the signer beside the proxy | `keycast` is created `--internal`; the signer has its own egress-only network; the proxy keeps a public network for ACME and ports |
+| Medium | `mem_limit` without `memswap_limit` allowed decrypted key material to be paged to host swap, which outlives the container | `memswap_limit` equals `mem_limit`, disabling swap for the cgroup. `/tmp` is also `noexec,nosuid,nodev` |
+| Medium | `.dockerignore` patterns were root-anchored, so the `legacy-v1/master.key` that `UPGRADE.md` instructs the operator to create would enter the build context, as would `web/.env` | Rewritten in allowlist form and verified by building the real context with planted decoy secrets. `UPGRADE.md` now archives legacy files outside the checkout |
+| Medium | Actions were pinned by mutable tag, images shipped without provenance, the publish step could run from any ref, and the documented "reviewed digest" had no procedure | Every action is pinned to a commit SHA with Dependabot to maintain them; images are built with provenance and an SBOM and attested; publishing is guarded to `master` and serialized; `upgrade_preflight.sh` runs `gh attestation verify` and fails closed |
+| Medium | `DELETE /teams/{id}` could never succeed once a team had any grant, including a revoked one: `grants` references `policies` with `ON DELETE RESTRICT` while `policies` cascades from `teams` | The handler deletes the team's grants inside the same immediate transaction. Reproduced against the real migrations before and after |
+| Low | `sign_event` forwarded a client-supplied event `id`. The nostr crate signs `unsigned.id` before verifying it, so the signer briefly produced a Schnorr signature over an attacker-chosen 32-byte value even though the mismatch was rejected | The `id` is always stripped and recomputed |
+| Low | Imported private keys left several unzeroized copies, and `AddKeyRequest` derived `Debug` over the plaintext | A `Secret` newtype erases its buffer on drop and redacts `Debug`; it is used on the control-socket body, the import request and the lifecycle request, and the lifecycle request is no longer cloned. The approval description now parses only the key name |
+| Low | An approval echoing a request body could carry private material to an external signer | Both the signer and the browser refuse to sign or accept an approval whose content contains `secret_key` or `nsec1`, including an operator pasting a key into the name field |
+| Low | `backup` accepted the root credential as the backup key, and the manifest carries the root | Rejected: the backup key must differ from the root |
+| Low | CSP allowed blanket `https:` in `connect-src` and `http:` in `img-src` | Narrowed to `'self'` and `wss:`; COOP and CORP added |
+| Low | Every signed-in page load fetched a contact list that nothing read, announcing the operator's pubkey and IP to five public relays, and the loader followed relay hints from fetched events | The follows feature was removed and `followRelayHints` is off |
+| Low | The `[pubkey]` route parameter was interpolated unvalidated into signed request paths | Rejected unless it is 32-byte lowercase hex |
+| Low | `upgrade_preflight.sh` opened the live database read-write as root after the ownership repair, which could leave root-owned WAL sidecars the container user cannot open | The check runs first, read-only, and warns about mis-owned sidecars |
+| Low | Systemd templates lacked kernel, namespace and syscall restrictions, and the web image let the runtime user own `/app` | Templates hardened with an empty capability bounding set and a `@system-service` filter; `/app` is root-owned |
+| Info | `decode_hex` accepted a leading sign, a non-regular credential file blocked startup inside a read, and the Dockerfile frontend was a mutable tag | Strict hex digits, regular-file check, digest-pinned frontend |
+| Info | `CREDENTIALS_DIRECTORY` silently won over an explicit `KEYCAST_ROOT_KEY_FILE`, and persistent state had to live inside the checkout | Setting both credential sources is rejected outright; `KEYCAST_STATE_DIR` relocates the database and root credential, defaulting to the checkout |
+
+## Review follow-up, September 9, 2026
+
+Addressed from the pull request review:
+
+- Publication now pushes to an immutable `sha-` tag, smoke-tests that exact digest, and only then
+  promotes it to `v2`/`latest` with `imagetools create`. A rebuild for publication could differ from
+  the tested image, because `apt-get install` is time-dependent when the layer cache misses.
+- The Compose hardening assertions moved into `scripts/check-compose-hardening.sh`, which inspects
+  rendered mounts instead of file text. The previous text search matched the comment documenting the
+  socket removal, so the job failed on the very configuration it was meant to accept.
+- The reply-key pin is retained in memory when browser storage is unavailable, disabled, or
+  throwing. Without that, every request became another first use and an API compromised mid-session
+  could substitute its identity without tripping the change warning.
+- The reply identity and its re-trust control now load from the unauthenticated `/config` rather
+  than the operator-only `/status`, so a team administrator who is not an instance operator can
+  still recover after a root-credential rotation.
+- `connect-src` accepts the explicitly configured API origin again, so a split-origin HTTPS
+  deployment is not blocked by the removal of the blanket `https:` source.
+- `KEYCAST_STATE_DIR` is honoured by `scripts/init.sh`, `scripts/generate_key.sh` and
+  `scripts/upgrade_preflight.sh`, so setup, validation and permission repair act on the same paths
+  Compose mounts rather than a stale copy in the checkout.
+- Preflight uses the plain database path with `sqlite3 -readonly`, tries GNU `stat -c` before the
+  BSD form, and reports the `gh attestation verify` diagnostic so an authentication or network
+  failure is not recorded as missing provenance.
+- The starvation regression waits on a new `configuration_reloads` counter instead of sleeping, and
+  the admission unit test asserts the constants that actually bind.
+- A test compares the Rust and TypeScript secret-marker lists, since the browser refuses first and a
+  marker present only in the signer would let content reach an external key store.
+- `UPGRADE.md` restarts the Keycast stack after the network is recreated; the previous ordering left
+  the signer, API and web containers stopped.
+
+Second follow-up round:
+
+- The reply-key pin is mirrored into memory whenever a persisted pin is read, not only when one is
+  established. A returning browser starts each page load with an empty session pin, so storage that
+  failed partway through a session would otherwise drop the anchor and accept a substituted identity
+  as another first use.
+- The state-relocation procedure moves the database files rather than the `database/` directory.
+  `database/migrations` is tracked source that the image build and the Rust tests read, so moving it
+  would have broken both; the signer reads migrations from inside the image.
+- That procedure also restarts the stack and verifies it, instead of ending on a validation step
+  that leaves every container stopped.
+
+Third follow-up round:
+
+- Tag promotion runs after every provenance attestation. Promoting first meant a failed attestation
+  could leave `v2` and `latest` resolving to a digest that `upgrade_preflight.sh` then rejects.
+- The Compose hardening checks run against `docker-compose.prod.yml` as well as the source file.
+  Production is what operators deploy, and only the source file was being asserted.
+- The state-relocation move runs inside one privileged shell. `database/` is mode `0700` owned by
+  UID 10001, so an ordinary operator's shell cannot list it to expand the wildcard: bash passes the
+  literal pattern and zsh refuses, while the credential move and `.env` edit that followed would
+  still succeed and leave the signer pointed at an empty directory. Validated as a non-root operator
+  against the shipped mode: the block now refuses and leaves nothing half-migrated.
+- Permission repair requires the database directory to exist, so a missing directory reports a
+  failure instead of aborting under `set -e` before the summary prints.
+- `init.sh` invokes `generate_key.sh` by absolute path. The existing `cd` made this work, but the
+  absolute path cannot be broken by a later edit that moves that `cd`.
+
+Two findings from an external review were investigated and **not** reproduced as issues. Discovered
+relays do not bypass the SSRF vetting: the runtime places every discovered relay in a restricted set
+and the custom transport routes those connections through `public_relay::connect`, which re-resolves
+and re-validates every DNS answer on each connect and refuses proxies. Unauthenticated read
+flooding remains bounded by the existing admission and socket limits.
+
+Known residual, unchanged:
+
+- Browser key import still moves the private key through the API process and through HTTP and JSON
+  buffers that cannot be zeroized from application code. The `Secret` wrapper narrows the window;
+  the trusted CLI remains the stronger path and the UI says so.
+- The API and the signer still share UID 10001. The socket permission fallback for filesystems that
+  reject `chmod` on a Unix socket deliberately depends on that, and the API has no writable mount to
+  own anything with, so the split was not worth breaking that path.
+- The API's per-peer upload budget still sees only the proxy address. `Caddyfile.example` sets body
+  limits; a per-IP rate limit needs a Caddy plugin or a host firewall, and is tracked in `TODO.md`.
+- Management reads (kind 27237) carry no nonce and stay replayable inside their 60-second window.
+  Reads pass through the API in plaintext regardless and expose no secrets.
+- The `ca-certificates` layer stays in the Rust runtime image. The signer uses webpki roots, so it
+  is unnecessary, but a CA bundle is not meaningful attack surface and removing it risks TLS
+  breakage that no local test would catch.
+
 ## Remaining deployment work and limits
 
 1. Obtain independent security review of the new management protocol, authorization transactions,

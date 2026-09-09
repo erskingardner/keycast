@@ -66,7 +66,10 @@
                 id="key-secret"
                 type="password"
                 required
-                autocomplete="off"
+                autocomplete="one-time-code"
+                data-1p-ignore
+                data-lpignore="true"
+                data-bwignore
                 spellcheck="false"
                 bind:value={secretKey}
                 placeholder="nsec1…"

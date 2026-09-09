@@ -10,6 +10,10 @@ function applySecurityHeaders(response: Response, event: Parameters<Handle>[0]["
     response.headers.set("X-Content-Type-Options", "nosniff");
     response.headers.set("X-Frame-Options", "DENY");
     response.headers.set("Referrer-Policy", "no-referrer");
+    // A remote signer supplies the auth_url we open; COOP stops that popup from
+    // reaching back into this window, and CORP blocks cross-origin embedding.
+    response.headers.set("Cross-Origin-Opener-Policy", "same-origin");
+    response.headers.set("Cross-Origin-Resource-Policy", "same-origin");
     response.headers.set("Permissions-Policy", "camera=(), microphone=(), geolocation=()");
 
     const forwardedProto = event.request.headers.get("x-forwarded-proto");

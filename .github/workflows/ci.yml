@@ -1,5 +1,9 @@
 name: CI
 
+# Every `uses:` is pinned to a commit SHA. A tag is mutable, and this repository's
+# other workflow holds `packages: write`, so a hijacked tag could publish an image
+# that operators then pin by digest. Dependabot keeps these current.
+
 on:
   pull_request:
   push:
@@ -20,19 +24,24 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
+      # The SHA below is the tip of this action's `1.96.0` branch, which is where
+      # it reads the version from; there is no `toolchain` input to pass.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
         with:
           components: rustfmt
 
       - name: Cache Rust build artifacts
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
 
       - name: Generate test master key
         run: |
           set -euo pipefail
+          umask 077
           openssl rand 32 | base64 > master.key
           chmod 600 master.key
 
@@ -41,6 +50,9 @@ jobs:
 
       - name: Check Rust workspace
         run: cargo check --workspace --locked
+
+      - name: Check the core crate builds and tests standalone
+        run: cargo test -p keycast_core --locked --no-run
 
       - name: Build Rust workspace
         run: cargo build --workspace --locked
@@ -61,10 +73,12 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.9
 
@@ -80,25 +94,47 @@ jobs:
       - name: Build web package
         run: bun run build
 
+  deployment:
+    name: Deployment configuration
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check Compose hardening
+        run: bash scripts/check-compose-hardening.sh
+
+      - name: Check shell scripts
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning scripts/*.sh
+
   security:
     name: Dependency security
     runs-on: ubuntu-latest
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
+      # Pinned to the tip of the action's `1.96.0` branch; see the Rust job above.
       - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@1.96.0
+        uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
 
       - name: Install cargo-audit
-        run: cargo install cargo-audit --locked
+        run: cargo install cargo-audit --locked --version 0.22.0
 
       - name: Audit Rust dependencies
         run: cargo audit
 
       - name: Set up Bun
-        uses: oven-sh/setup-bun@v2
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: 1.3.9
 

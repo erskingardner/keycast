@@ -1015,6 +1015,90 @@ async fn runtime_isolates_noisy_grant_before_waiting_for_authority() {
     relay.shutdown();
 }
 
+#[tokio::test]
+async fn forged_flood_cannot_starve_a_client_that_already_holds_a_session() {
+    // A grant's remote-signer public key is published in every bunker URI and in
+    // every client request, so anyone can address events to it. Admission must
+    // not let that traffic consume the capacity a live session depends on.
+    let relay = LocalRelay::new();
+    relay.run().await.unwrap();
+    let f = Fixture::new(relay.url().await.as_str()).await;
+    let observer = Client::new();
+    observer.add_relay(relay.url().await).await.unwrap();
+    let mut stream = observer.notifications();
+    observer.connect().and_wait(Duration::from_secs(2)).await;
+    observer
+        .subscribe(
+            Filter::new()
+                .kind(Kind::NostrConnect)
+                .pubkey(f.client.public_key()),
+        )
+        .await
+        .unwrap();
+    let state = RuntimeState::new(f.store.clone());
+    let (stop, rx) = tokio::sync::watch::channel(false);
+    let task = tokio::spawn(relay_supervisor(state.clone(), rx));
+    ready(&state).await;
+
+    // Establish the session that must survive the flood.
+    observer.send_event(&f.connect()).await.unwrap();
+    assert_eq!(reply(&mut stream, "connect", &f).await["result"], "ack");
+    let sessions: i64 = query_scalar("SELECT count(*) FROM sessions WHERE ended_at IS NULL")
+        .fetch_one(&f.store.pool)
+        .await
+        .unwrap();
+    assert_eq!(sessions, 1);
+    // Wait for the live-session index rather than guessing. `notify_one` retains
+    // a permit when the supervisor is busy in another branch, so the wake cannot
+    // be lost the way `notify_waiters` can.
+    let reloads = state.configuration_reloads.load(Ordering::Relaxed);
+    state.reload.notify_one();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while state.configuration_reloads.load(Ordering::Relaxed) <= reloads {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("configuration refresh rebuilds the live-session index");
+
+    // Hold the authority gate so admitted workers occupy their lane, then flood
+    // from rotating keys the way an attacker on a shared relay would.
+    let authority = f.store.authority.lock().await;
+    let before = state.metrics.ingress_rejections.load(Ordering::Relaxed);
+    for n in 0..24 {
+        let attacker = Keys::generate();
+        let forged = EventBuilder::new(Kind::NostrConnect, format!("forged-{n}"))
+            .tag(Tag::public_key(f.remote.public_key()))
+            .finalize(&attacker)
+            .unwrap();
+        observer.send_event(&forged).await.unwrap();
+    }
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while state.metrics.ingress_rejections.load(Ordering::Relaxed) <= before {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the newcomer lane rejects a forged flood");
+
+    // The established client is served from its own lane while that flood is
+    // still being rejected. Before the lanes were split this ping was dropped.
+    observer
+        .send_event(&f.event("ping-under-flood", "ping", vec![]))
+        .await
+        .unwrap();
+    drop(authority);
+    assert_eq!(
+        reply(&mut stream, "ping-under-flood", &f).await["result"],
+        "pong"
+    );
+
+    stop.send(true).unwrap();
+    task.await.unwrap().unwrap();
+    observer.shutdown().await;
+    relay.shutdown();
+}
+
 include!("support/process_recovery.rs");
 
 #[tokio::test]

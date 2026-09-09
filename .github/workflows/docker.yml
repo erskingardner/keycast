@@ -1,5 +1,17 @@
 name: Docker Images
 
+# Only a smoke-tested artefact reaches an operator-facing tag.
+#
+# The build is pushed once to an immutable `sha-` tag, that exact digest is
+# pulled back and smoke-tested, then attested, and only then promoted to `v2` and
+# `latest` with `imagetools create`, which re-points tags without rebuilding.
+# Promotion runs last so those tags can never resolve to a digest whose smoke
+# test or attestation failed. A rebuild for publication could differ from the
+# tested image: `apt-get install` is time-dependent when the layer cache misses.
+#
+# Operators pin a digest, and a digest only pins what you already trust, so
+# `scripts/upgrade_preflight.sh` verifies the attestation minted below.
+
 on:
   push:
     branches:
@@ -8,7 +20,11 @@ on:
 
 permissions:
   contents: read
-  packages: write
+
+# Never let two publishes race for the same mutable tags.
+concurrency:
+  group: docker-publish
+  cancel-in-progress: false
 
 env:
   REGISTRY: ghcr.io
@@ -21,47 +37,163 @@ jobs:
     name: Build, smoke, and publish v2 images
     runs-on: ubuntu-latest
 
+    permissions:
+      contents: read
+      packages: write
+      # Required to mint the provenance attestations below.
+      id-token: write
+      attestations: write
+
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
+
+      # Gate the code before anything is pushed, including on a branch dispatch
+      # where no publication happens at all.
+      - name: Build all runtime targets locally
+        run: |
+          set -euo pipefail
+          docker buildx build --load --target api-runtime --tag keycast-hardening-api:local .
+          docker buildx build --load --target signer-runtime --tag keycast-hardening-signer:local .
+          docker buildx build --load --target web-runtime --tag keycast-hardening-web:local .
+
+      - name: Smoke test the local build
+        run: scripts/container-smoke.sh
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        if: github.ref == 'refs/heads/master'
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build all runtime targets
-        run: |
-          set -euo pipefail
-          docker buildx build --load --target api-runtime --tag keycast-api:ci .
-          docker buildx build --load --target signer-runtime --tag keycast-signer:ci .
-          docker buildx build --load --target web-runtime --tag keycast-web:ci .
+      - name: Compute the immutable tag
+        if: github.ref == 'refs/heads/master'
+        id: tags
+        run: echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
 
-      - name: Smoke test hardened process split
+      # Push to the immutable sha- tag only. v2 and latest are not moved until
+      # the pushed digest itself has passed the smoke test below.
+      - name: Push API image to its immutable tag
+        if: github.ref == 'refs/heads/master'
+        id: api
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: api-runtime
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.API_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+
+      - name: Push signer image to its immutable tag
+        if: github.ref == 'refs/heads/master'
+        id: signer
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: signer-runtime
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.SIGNER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+
+      - name: Push web image to its immutable tag
+        if: github.ref == 'refs/heads/master'
+        id: web
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
+        with:
+          context: .
+          target: web-runtime
+          push: true
+          provenance: mode=max
+          sbom: true
+          tags: ${{ env.WEB_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+
+      # Smoke the exact published artefacts, not a second local build.
+      - name: Smoke test the published digests
+        if: github.ref == 'refs/heads/master'
         run: |
           set -euo pipefail
-          docker tag keycast-api:ci keycast-hardening-api:local
-          docker tag keycast-signer:ci keycast-hardening-signer:local
-          docker tag keycast-web:ci keycast-hardening-web:local
+          docker image rm -f keycast-hardening-api:local keycast-hardening-signer:local keycast-hardening-web:local
+          docker pull "${API_IMAGE}@${{ steps.api.outputs.digest }}"
+          docker pull "${SIGNER_IMAGE}@${{ steps.signer.outputs.digest }}"
+          docker pull "${WEB_IMAGE}@${{ steps.web.outputs.digest }}"
+          docker tag "${API_IMAGE}@${{ steps.api.outputs.digest }}" keycast-hardening-api:local
+          docker tag "${SIGNER_IMAGE}@${{ steps.signer.outputs.digest }}" keycast-hardening-signer:local
+          docker tag "${WEB_IMAGE}@${{ steps.web.outputs.digest }}" keycast-hardening-web:local
           scripts/container-smoke.sh
 
-      - name: Tag and publish images
+      - name: Attest API build provenance
+        if: github.ref == 'refs/heads/master'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.API_IMAGE }}
+          subject-digest: ${{ steps.api.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest signer build provenance
+        if: github.ref == 'refs/heads/master'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.SIGNER_IMAGE }}
+          subject-digest: ${{ steps.signer.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest web build provenance
+        if: github.ref == 'refs/heads/master'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.WEB_IMAGE }}
+          subject-digest: ${{ steps.web.outputs.digest }}
+          push-to-registry: true
+
+      # Last, so v2 and latest can never resolve to a digest whose attestation
+      # failed and which scripts/upgrade_preflight.sh would therefore reject.
+      # No rebuild: the artefact an operator pulls is byte-identical to the one
+      # smoke-tested above.
+      - name: Promote the tested and attested digests
+        if: github.ref == 'refs/heads/master'
         run: |
           set -euo pipefail
-          short_sha="${GITHUB_SHA:0:12}"
-          for component in api signer web; do
-            case "$component" in
-              api) destination="$API_IMAGE" ;;
-              signer) destination="$SIGNER_IMAGE" ;;
-              web) destination="$WEB_IMAGE" ;;
-            esac
-            for tag in v2 latest "sha-$short_sha"; do
-              docker tag "keycast-$component:ci" "$destination:$tag"
-              docker push "$destination:$tag"
+          promote() {
+            local image="$1" digest="$2"
+            docker buildx imagetools create \
+              --tag "${image}:v2" \
+              --tag "${image}:latest" \
+              "${image}@${digest}"
+          }
+          promote "$API_IMAGE" "${{ steps.api.outputs.digest }}"
+          promote "$SIGNER_IMAGE" "${{ steps.signer.outputs.digest }}"
+          promote "$WEB_IMAGE" "${{ steps.web.outputs.digest }}"
+
+      # The digests an operator copies into .env, with the verify command.
+      - name: Report digests for pinning
+        if: github.ref == 'refs/heads/master'
+        run: |
+          {
+            echo "## Smoke-tested digests for .env"
+            echo
+            echo '```sh'
+            echo "KEYCAST_API_DIGEST=${{ steps.api.outputs.digest }}"
+            echo "KEYCAST_SIGNER_DIGEST=${{ steps.signer.outputs.digest }}"
+            echo "KEYCAST_WEB_DIGEST=${{ steps.web.outputs.digest }}"
+            echo '```'
+            echo
+            echo "Verify each before deploying:"
+            echo
+            echo '```sh'
+            for pair in \
+              "${API_IMAGE}@${{ steps.api.outputs.digest }}" \
+              "${SIGNER_IMAGE}@${{ steps.signer.outputs.digest }}" \
+              "${WEB_IMAGE}@${{ steps.web.outputs.digest }}"; do
+              echo "gh attestation verify oci://$pair --repo ${{ github.repository }}"
             done
-          done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
