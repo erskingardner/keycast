@@ -40,6 +40,31 @@ function throwingStorage(): Storage {
     } as unknown as Storage;
 }
 
+/** Readable until revoked, like storage that stops working mid-session. */
+function revocableStorage(): Storage & { revoke: () => void } {
+    const inner = memoryStorage();
+    let live = true;
+    const guard = <T>(operation: () => T): T => {
+        if (!live) throw new Error("storage is disabled");
+        return operation();
+    };
+    return {
+        get length(): number {
+            return guard(() => inner.length);
+        },
+        clear: () => guard(() => inner.clear()),
+        getItem: (key: string) => guard(() => inner.getItem(key)),
+        key: (index: number) => guard(() => inner.key(index)),
+        removeItem: (key: string) => guard(() => inner.removeItem(key)),
+        setItem: (key: string, value: string) =>
+            guard(() => inner.setItem(key, value)),
+        revoke: () => {
+            live = false;
+        },
+    } as Storage & { revoke: () => void };
+}
+
+const PIN_KEY = "keycast:management-reply-identity:v1";
 const first = "a".repeat(64);
 const second = "b".repeat(64);
 
@@ -128,8 +153,22 @@ describe("management reply identity pinning", () => {
     test("a persisted pin outranks a stale session pin", () => {
         const store = memoryStorage();
         trustManagementReplyKey(second, undefined);
-        store.setItem("keycast:management-reply-identity:v1", first);
+        store.setItem(PIN_KEY, first);
         expect(pinnedManagementReplyKey(store)).toBe(first);
+    });
+
+    test("a pin read from storage survives storage becoming unreadable", () => {
+        // The returning-browser case: a persisted pin and a fresh session, then
+        // storage stops working. Without mirroring the read into memory this
+        // would look like a first use and accept a substituted identity.
+        const store = revocableStorage();
+        store.setItem(PIN_KEY, first);
+        expect(verifyManagementReplyKey(first, store)).toBe(first);
+        store.revoke();
+        expect(() => verifyManagementReplyKey(second, store)).toThrow(
+            "identity changed",
+        );
+        expect(verifyManagementReplyKey(first, store)).toBe(first);
     });
 
     test("fingerprints are short, stable and never the whole key", () => {

@@ -126,18 +126,33 @@ sudo docker compose -f docker-compose.prod.yml exec -T keycast-signer \
 **Swap is now disabled for the containers.** `memswap_limit` matches `mem_limit` so decrypted key
 material cannot be paged to host swap. No action needed, but confirm the host has enough RAM.
 
-**State can now live outside the checkout.** `KEYCAST_STATE_DIR` moves `database/` and `master.key`
-away from the working tree, so a `git` operation or a source build can never reach them. It defaults
-to the checkout, so existing deployments are unaffected. To move an existing instance, stop the
-stack, move both, and record the new location:
+**State can now live outside the checkout.** `KEYCAST_STATE_DIR` moves the runtime database and
+`master.key` away from the working tree, so a `git` operation or a source build can never reach
+them. It defaults to the checkout, so existing deployments are unaffected.
+
+Move the database *files*, not the `database/` directory: `database/migrations` is tracked source
+that both the image build and the Rust tests read, and relocating it breaks them. The signer reads
+migrations from inside the image, so the external directory holds only the database.
 
 ~~~sh
 sudo docker compose -f docker-compose.prod.yml down
-sudo install -d -m 0700 -o 10001 -g 10001 /srv/keycast
-sudo mv database master.key /srv/keycast/
+sudo install -d -m 0700 -o 10001 -g 10001 /srv/keycast /srv/keycast/database
+sudo mv database/keycast-v2.db* /srv/keycast/database/
+sudo mv master.key /srv/keycast/
 echo "KEYCAST_STATE_DIR=/srv/keycast" | sudo tee -a .env
-sudo scripts/upgrade_preflight.sh --fix-permissions
 ~~~
+
+Stale `database/keycast-v2.*.lock` files can be deleted; the signer recreates them. Then validate
+and restart:
+
+~~~sh
+sudo scripts/upgrade_preflight.sh --fix-permissions
+sudo docker compose -f docker-compose.prod.yml up -d
+sudo docker compose -f docker-compose.prod.yml ps
+~~~
+
+Confirm the signer reports schema version 2 and your existing keys on the **Status** page before
+deleting anything from the old location.
 
 `scripts/init.sh --state-dir /srv/keycast` sets this up for a fresh install, and the preflight
 resolves the same path so it never validates a stale copy.

@@ -44,8 +44,15 @@ export function pinnedManagementReplyKey(
     } catch {
         stored = null;
     }
-    // Persisted value wins; the session pin covers a store that cannot be read.
-    return stored ?? sessionPin;
+    if (stored) {
+        // Mirror a persisted pin into memory on every read, not only when one is
+        // established. A returning browser starts each page load with an empty
+        // session pin, so without this the anchor would be lost the moment
+        // storage stopped being readable partway through the session.
+        sessionPin = stored;
+        return stored;
+    }
+    return sessionPin;
 }
 
 export function trustManagementReplyKey(

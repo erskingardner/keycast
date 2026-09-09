@@ -119,6 +119,18 @@ Addressed from the pull request review:
 - `UPGRADE.md` restarts the Keycast stack after the network is recreated; the previous ordering left
   the signer, API and web containers stopped.
 
+Second follow-up round:
+
+- The reply-key pin is mirrored into memory whenever a persisted pin is read, not only when one is
+  established. A returning browser starts each page load with an empty session pin, so storage that
+  failed partway through a session would otherwise drop the anchor and accept a substituted identity
+  as another first use.
+- The state-relocation procedure moves the database files rather than the `database/` directory.
+  `database/migrations` is tracked source that the image build and the Rust tests read, so moving it
+  would have broken both; the signer reads migrations from inside the image.
+- That procedure also restarts the stack and verifies it, instead of ending on a validation step
+  that leaves every container stopped.
+
 Two findings from an external review were investigated and **not** reproduced as issues. Discovered
 relays do not bypass the SSRF vetting: the runtime places every discovered relay in a restricted set
 and the custom transport routes those connections through `public_relay::connect`, which re-resolves
