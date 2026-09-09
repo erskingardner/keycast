@@ -138,7 +138,7 @@ async fn handle_connection(
                     } else {
                         builder
                     };
-                    match builder.body(axum::body::Body::from(body)) {
+                    match builder.body(axum::body::Body::from(body.expose().to_owned())) {
                         Ok(request) => {
                             let response =
                                 router.oneshot(request).await.expect("infallible router");
@@ -187,7 +187,12 @@ pub(crate) async fn dispatch_lifecycle(
             secret_key,
         } => state
             .store
-            .seal_stored_key(team_id, &actor_public_key, name, Zeroizing::new(secret_key))
+            .seal_stored_key(
+                team_id,
+                &actor_public_key,
+                name,
+                secret_key.into_zeroizing(),
+            )
             .await
             .map(|key| ControlResponse::StoredKey { key }),
         LifecycleRequest::CreateGrant {
@@ -319,7 +324,7 @@ mod connection_tests {
                 method: "GET".into(),
                 path: endpoint.into(),
                 authorization: None,
-                body: String::new(),
+                body: keycast_core::v2::secret::Secret::new(String::new()),
             };
             stream
                 .write_all(&serde_json::to_vec(&request).unwrap())

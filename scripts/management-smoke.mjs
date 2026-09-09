@@ -30,7 +30,11 @@ async function request(method,path,data,legacy=false) {
  const response=await http(base+path,{method,headers:{authorization:'Nostr '+Buffer.from(JSON.stringify(event)).toString('base64'),'content-type':'application/json'},body:write&&body?body:undefined});
  if(write&&!legacy&&response.ok) {
   const encrypted=await response.json();assert.ok(encrypted.encrypted_response);assert.ok(!JSON.stringify(encrypted).includes('bunker://'));
-  const reply=JSON.parse(nip44.decrypt(encrypted.encrypted_response,nip44.utils.getConversationKey(responseKey,encrypted.public_key)));
+  // The signer must reply from the stable identity /config publishes, so NIP-44
+  // authenticates the sender. Decrypt with the published key, never the returned one.
+  assert.match(config.management_reply_public_key,/^[0-9a-f]{64}$/);
+  assert.equal(encrypted.public_key,config.management_reply_public_key);
+  const reply=JSON.parse(nip44.decrypt(encrypted.encrypted_response,nip44.utils.getConversationKey(responseKey,config.management_reply_public_key)));
   return {status:reply.status,body:reply.body?JSON.parse(reply.body):null};
  }
  return {status:response.status,body:await response.json().catch(()=>null)};
@@ -52,5 +56,14 @@ const legacyResult=await new Promise((resolve,reject)=>{
  socket.on('connect',()=>socket.end(JSON.stringify({operation:'create_grant',team_id:team.body.team.id,actor_public_key:pubkey,stored_key_id:imported.body.id,policy_id:policy.body.id,name:'Forged authority',expires_at:null,invitation_expires_at:Math.floor(Date.now()/1000)+300})));
 });
 assert.equal(legacyResult.result,'error');assert.equal(legacyResult.code,'invalid_request');
+// The reply identity is stable across requests, not fresh per reply.
+const firstConfig=await http(`${base}/config?pubkey=${pubkey}`).then(r=>r.json());
+const secondConfig=await http(`${base}/config?pubkey=${pubkey}`).then(r=>r.json());
+assert.equal(firstConfig.management_reply_public_key,secondConfig.management_reply_public_key);
+// An approval whose description would carry private material is refused.
+assert.equal((await request('POST',`/teams/${team.body.team.id}/keys`,{name:'nsec1pasted',secret_key:Buffer.from(key).toString('hex')})).status,400);
+// A team that has issued a grant must still be deletable.
+assert.equal((await request('DELETE',`/teams/${team.body.team.id}`)).status,204);
+assert.equal((await request('GET',`/teams/${team.body.team.id}`)).status,403);
 key.fill(0);responseKey.fill(0);
-console.log('PASS: read-only API/signer/web; signed management; legacy write rejection; browser key import; encrypted invitation creation');
+console.log('PASS: read-only API/signer/web; signed management; pinned reply identity; legacy write rejection; browser key import; encrypted invitation creation; approval content guard; team delete with grants');

@@ -36,8 +36,9 @@ Requirements:
 
 - a Linux VM with current Docker Engine and the Compose plugin;
 - DNS for the chosen hostname;
-- an external Docker network named `keycast`;
-- a reverse proxy attached to that network. `caddy-docker-compose-example.yml` is provided.
+- an internal external Docker network named `keycast` (`docker network create --internal keycast`);
+- a reverse proxy attached to that network. `caddy-docker-compose-example.yml` and
+  `Caddyfile.example` are provided and use a static configuration with no Docker socket mount.
 
 Initialize a checkout:
 
@@ -51,9 +52,17 @@ sudo docker compose -f docker-compose.prod.yml pull
 sudo docker compose -f docker-compose.prod.yml up -d
 ```
 
+Then copy `Caddyfile.example` to `Caddyfile`, review it, and start the proxy with
+`docker compose -f caddy-docker-compose-example.yml up -d`.
+
 `ALLOWED_PUBKEYS` is the instance admission allowlist. `KEYCAST_OPERATOR_PUBKEYS` controls global relay changes. It fails closed when absent. Open registration
 exists only as an explicit development escape hatch through `KEYCAST_ALLOW_OPEN_REGISTRATION=true`;
 do not enable it on an Internet-facing instance.
+
+The `keycast` network is internal, so the API and web containers have no route off the host. The
+signer gets its own egress network for relay connections, and the reverse proxy keeps a public
+network for ACME and published ports. Nothing needs inbound access to the signer: the API reaches
+it only through the private socket volume.
 
 The setup creates a 32-byte root key in `master.key`, mode `0600`, and assigns the database and key
 to the fixed container UID/GID `10001`. The file is mounted read-only into the signer only. V2 can
@@ -65,7 +74,15 @@ Production publishes three images:
 - `ghcr.io/marmot-protocol/keycast-api:v2`
 - `ghcr.io/marmot-protocol/keycast-web:v2`
 
-Production Compose requires a SHA-256 manifest digest that has been reviewed for each of the three images.
+Production Compose requires a SHA-256 manifest digest for each of the three images. A digest only
+pins what you already trust, so verify each one was built by this repository before deploying it:
+
+```sh
+gh attestation verify oci://ghcr.io/marmot-protocol/keycast-signer@sha256:... \
+  --repo marmot-protocol/keycast
+```
+
+`scripts/upgrade_preflight.sh` runs that check for all three images when `gh` is installed.
 Use source Compose (`docker compose up -d --build`) for a local build.
 
 ## Operations
@@ -76,6 +93,7 @@ The authenticated **Status** page reports:
 - active grants, sessions, and claimable invitations;
 - enabled and connected relay counts;
 - per-relay connection, receive, publish, failure, and error checkpoints;
+- the management reply identity fingerprint, for comparison against `keycast_signer status`;
 - the last processed request and redacted failure counters.
 
 API health and signing readiness are separate so management remains available during relay outages.

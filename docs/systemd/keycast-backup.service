@@ -9,9 +9,36 @@ Group=keycast
 UMask=0077
 EnvironmentFile=/etc/keycast/host-operations.env
 ExecStart=/usr/bin/python3 /opt/keycast/scripts/operations/keycast_ops.py backup /etc/keycast/operations.json
+TimeoutStartSec=1h
+
+# The backup CLI reads the database and root credential and writes an encrypted
+# archive, so it needs the database directory (the snapshot is written beside the
+# database) and the backup directory, and nothing else.
+ReadWritePaths=/srv/keycast/database /srv/keycast/backups
+ReadOnlyPaths=/secure/keycast-backup.key
+
 NoNewPrivileges=yes
 PrivateTmp=yes
+PrivateDevices=yes
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/srv/keycast /run/keycast
-TimeoutStartSec=1h
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+# Unix for the signer socket; INET for the off-host upload.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources @obsolete

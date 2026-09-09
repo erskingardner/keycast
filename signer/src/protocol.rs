@@ -731,13 +731,11 @@ fn parse_sign_event_template(
             return Err(SignEventTemplateError::Invalid);
         }
     }
-    if object
-        .get("id")
-        .and_then(Value::as_str)
-        .is_some_and(|id| id.len() == 64 && id.bytes().all(|b| b == b'0'))
-    {
-        object.remove("id");
-    }
+    // Always drop a client-supplied id and recompute it while signing. The nostr
+    // crate signs `unsigned.id` before verifying it, so forwarding one would make
+    // the signer produce a Schnorr signature over an attacker-chosen 32-byte value
+    // even though the mismatch is rejected afterwards.
+    object.remove("id");
 
     match object.get("pubkey") {
         None => {
@@ -906,6 +904,27 @@ mod tests {
             .expect("nak unsigned full-event representation");
         assert_eq!(parsed.pubkey, user);
         assert_eq!(parsed.id, None);
+    }
+
+    #[test]
+    fn sign_event_never_signs_a_client_supplied_id() {
+        let user = Keys::generate().public_key();
+        let mut template = json!({
+            "kind": 1,
+            "content": "hello",
+            "tags": [],
+            "created_at": Timestamp::now().as_secs()
+        });
+        let canonical = parse_sign_event_template(&template.to_string(), &user)
+            .expect("canonical template")
+            .compute_id();
+
+        // A forged id must never reach the signing call, and must not change the result.
+        template["id"] = Value::String("f".repeat(64));
+        let parsed = parse_sign_event_template(&template.to_string(), &user)
+            .expect("template with a forged id");
+        assert_eq!(parsed.id, None);
+        assert_eq!(parsed.compute_id(), canonical);
     }
 
     #[test]

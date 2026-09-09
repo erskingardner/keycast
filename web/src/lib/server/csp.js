@@ -19,9 +19,13 @@ const baseDirectives = {
     "form-action": ["self"],
     "script-src": ["self"],
     "style-src": ["self", "unsafe-inline"],
-    "img-src": ["self", "data:", "blob:", "https:", "http:"],
+    // Profile pictures come from arbitrary hosts; upgrade-insecure-requests
+    // rewrites any http: URL, so only https: needs to be allowed.
+    "img-src": ["self", "data:", "blob:", "https:"],
     "font-src": ["self", "data:"],
-    "connect-src": ["self", "https:", "wss:", "ws:"],
+    // The UI talks to its own origin and to Nostr relays over wss:. A blanket
+    // https: source would be an open exfiltration channel if XSS ever landed.
+    "connect-src": ["self", "wss:"],
     "upgrade-insecure-requests": true,
 };
 

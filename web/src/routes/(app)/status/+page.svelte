@@ -11,6 +11,11 @@
         WarningCircle,
     } from "phosphor-svelte";
     import { toast } from "svelte-hot-french-toast";
+    import {
+        managementReplyFingerprint,
+        pinnedManagementReplyKey,
+        trustManagementReplyKey,
+    } from "$lib/utils/reply_identity";
 
     const api = new KeycastApi();
     const user = $derived(getCurrentUser()?.user);
@@ -21,6 +26,27 @@
     let minimumConnectedRelays = $state(1);
     let relayLines = $state("");
     let autoActivate = $state(false);
+    let pinnedReplyKey = $state<string | null>(null);
+    const publishedReplyKey = $derived.by(
+        () => status?.signer.management_reply_public_key ?? null,
+    );
+    // A mismatch means either a deliberate root rotation or a substituted key.
+    const replyKeyChanged = $derived(
+        !!publishedReplyKey &&
+            !!pinnedReplyKey &&
+            publishedReplyKey !== pinnedReplyKey,
+    );
+
+    $effect(() => {
+        pinnedReplyKey = pinnedManagementReplyKey();
+    });
+
+    function trustReplyKey() {
+        if (!publishedReplyKey) return;
+        trustManagementReplyKey(publishedReplyKey);
+        pinnedReplyKey = publishedReplyKey;
+        toast.success("Management reply identity trusted");
+    }
 
     $effect(() => {
         if (user?.pubkey) void refresh();
@@ -233,12 +259,43 @@
         {/each}
     </div>
 
+    {#if replyKeyChanged}
+        <div class="card mb-5" role="alert">
+            <h2 class="text-xl font-bold mb-3 text-warning">
+                Management reply identity changed
+            </h2>
+            <p class="description mb-3">
+                This browser pinned <code
+                    >{managementReplyFingerprint(pinnedReplyKey ?? "")}</code
+                >
+                but the signer now publishes
+                <code>{managementReplyFingerprint(publishedReplyKey ?? "")}</code
+                >. Management writes stay blocked until this is resolved.
+            </p>
+            <p class="description mb-3">
+                Run <code>keycast_signer status</code> on your host and compare
+                its <code>management_reply_public_key</code>. Trust the new
+                identity only if you rotated the root credential yourself.
+            </p>
+            <button class="button button-danger" onclick={trustReplyKey}
+                >Trust this identity</button
+            >
+        </div>
+    {/if}
+
     <div class="card mb-5">
         <h2 class="text-xl font-bold mb-3">Diagnostics</h2>
         <div class="grid sm:grid-cols-2 gap-2 text-sm text-muted">
             <p>
                 Credential fingerprint: <code
                     >{status.signer.credential_key_id ?? "unavailable"}</code
+                >
+            </p>
+            <p>
+                Management reply identity: <code
+                    >{publishedReplyKey
+                        ? managementReplyFingerprint(publishedReplyKey)
+                        : "unavailable"}</code
                 >
             </p>
             <p>Denied requests: {status.signer.denied_requests}</p>

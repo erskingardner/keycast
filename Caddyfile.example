@@ -1,0 +1,56 @@
+# Static reverse proxy configuration for a Keycast instance.
+#
+# A static file is used deliberately. Label-driven proxies need the Docker socket,
+# which is root-equivalent on the host: a compromise of the only process parsing
+# untrusted Internet traffic would then expose master.key, the database, and the
+# signer itself. Keycast has exactly two upstreams, so discovery buys nothing.
+#
+# Copy to ./Caddyfile and set DOMAIN in .env before starting the proxy.
+
+{
+	# No admin API. It would otherwise listen on localhost:2019 inside the
+	# container and can reconfigure the proxy.
+	admin off
+	# Uncomment for the staging CA while testing certificate issuance.
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		Cross-Origin-Opener-Policy same-origin
+		-Server
+	}
+
+	# The API's own per-peer upload budget sees only this proxy's address, so the
+	# ceilings that matter for public clients are set here.
+	handle /api/* {
+		request_body {
+			# Matches MAX_HTTP_BODY in core/src/v2/management.rs.
+			max_size 1MB
+		}
+		reverse_proxy keycast-api:3000 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	handle {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy keycast-web:5173 {
+			header_up X-Forwarded-Proto https
+		}
+	}
+
+	log {
+		output stdout
+		format console
+		# Management URLs carry public keys; keep proxy logs off by default if
+		# that metadata matters to you.
+	}
+}

@@ -1,6 +1,7 @@
 pub mod control;
 pub mod envelope;
 pub mod policy;
+pub mod secret;
 pub mod team_slug;
 
 pub const SCHEMA_VERSION: i64 = 2;

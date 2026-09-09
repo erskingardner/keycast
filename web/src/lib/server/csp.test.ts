@@ -20,12 +20,8 @@ describe("configured API content security policy", () => {
         for (const api of [undefined, "https://keycast.example"]) {
             const policy = createCspDirectives(api);
             expect(policy["upgrade-insecure-requests"]).toBe(true);
-            expect(policy["connect-src"]).toEqual([
-                "self",
-                "https:",
-                "wss:",
-                "ws:",
-            ]);
+            expect(policy["connect-src"]).toEqual(["self", "wss:"]);
+            expect(policy["img-src"]).not.toContain("http:");
         }
     });
     test("rejects HTTP origins that only resemble loopback", () => {

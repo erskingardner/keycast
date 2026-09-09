@@ -159,6 +159,14 @@ pub async fn command(args: &[String], root: &Path) -> Result<()> {
         }
         "backup" if args.len() == 3 => {
             let backup_cipher = EnvelopeCipher::from_file(Path::new(&args[1]))?;
+            // The manifest carries the root credential, so the archive is only as
+            // separate as its key. Reusing the root removes that separation.
+            if backup_cipher.key_id() == store.cipher.key_id() {
+                return Err(
+                    "backup key must differ from the root credential; generate one with generate-key"
+                        .into(),
+                );
+            }
             let root_path = keycast_core::v2::envelope::credential_path()
                 .ok_or("root credential path required")?;
             let private_root = Zeroizing::new(std::fs::read_to_string(root_path)?);

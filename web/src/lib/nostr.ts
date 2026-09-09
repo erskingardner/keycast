@@ -9,7 +9,7 @@ import { createEventLoaderForStore } from "applesauce-loaders/loaders";
 import { RelayPool } from "applesauce-relay";
 import type { ISigner } from "applesauce-signers";
 import { ExtensionSigner, NostrConnectSigner } from "applesauce-signers";
-import { catchError, firstValueFrom, of, timeout, takeUntil, timer, toArray, filter, take } from "rxjs";
+import { catchError, firstValueFrom, of, takeUntil, timer, toArray, filter, take } from "rxjs";
 import {
     DEFAULT_NOSTR_READ_RELAYS,
     DEFAULT_OUTBOX_RELAYS,
@@ -43,7 +43,6 @@ export type NostrConnectSigninOptions = {
 };
 
 const PROFILE_LOAD_TIMEOUT_MS = 5000;
-const CONTACTS_LOAD_TIMEOUT_MS = 5000;
 export const DEFAULT_NOSTR_CONNECT_RELAYS = [
     ...REQUIRED_PUBLIC_RELAYS,
 ] as const;
@@ -58,7 +57,8 @@ const loaderRelays = Array.from(
 
 createEventLoaderForStore(eventStore, relayPool, {
     bufferTime: 1000,
-    followRelayHints: true,
+    // Do not open connections to relays named inside fetched events.
+    followRelayHints: false,
     extraRelays: [...DEFAULT_NOSTR_READ_RELAYS],
     lookupRelays: loaderRelays,
 });
@@ -225,7 +225,14 @@ export async function signNostrEvent(
     template: EventTemplate,
     expectedPubkey?: string,
 ): Promise<NostrEvent> {
-    const signer = activeSigner?.signer ?? getExtensionSigner();
+    // After a reload the cookie can outlive the signer connection. Say so instead
+    // of silently prompting whichever extension happens to be installed.
+    if (!activeSigner) {
+        throw new Error(
+            "Your signer is no longer connected. Sign in again to approve this change.",
+        );
+    }
+    const signer = activeSigner.signer;
     const normalizedExpectedPubkey = expectedPubkey
         ? normalizePubkey(expectedPubkey)
         : null;
@@ -278,15 +285,31 @@ function disposeSigner(signer: ISigner | null | undefined): void {
     disposable?.destroy?.();
 }
 
+/**
+ * The remote signer chooses this URL, so treat it as untrusted input: require
+ * https and open with `noopener` so the popup cannot navigate this window to a
+ * look-alike page while the operator is signing in.
+ */
 function openSignerAuthChallenge(url: string): Promise<void> {
-    if (typeof window !== "undefined") {
-        window.open(
-            url,
-            "keycast-signer-auth",
-            "width=420,height=640,resizable=yes,status=no,location=yes,toolbar=no,menubar=no",
+    if (typeof window === "undefined") return Promise.resolve();
+
+    let target: URL;
+    try {
+        target = new URL(url);
+    } catch {
+        return Promise.reject(new Error("The signer sent an invalid authorization URL"));
+    }
+    if (target.protocol !== "https:") {
+        return Promise.reject(
+            new Error(`The signer requested a non-HTTPS authorization URL (${target.protocol})`),
         );
     }
 
+    window.open(
+        target.href,
+        "keycast-signer-auth",
+        "noopener,noreferrer,width=420,height=640,resizable=yes,status=no,location=yes,toolbar=no,menubar=no",
+    );
     return Promise.resolve();
 }
 
@@ -307,20 +330,3 @@ export async function loadProfile(
     return profileCache.load(normalized);
 }
 
-export async function loadFollowPubkeys(
-    pubkey: string | null | undefined,
-): Promise<string[]> {
-    const normalized = pubkey ? normalizePubkey(pubkey) : null;
-    if (!normalized) return [];
-
-    const contacts = await firstValueFrom(
-        eventStore.contacts(normalized).pipe(
-            timeout({ first: CONTACTS_LOAD_TIMEOUT_MS }),
-            catchError(() => of([])),
-        ),
-    );
-
-    return contacts
-        .map((contact) => normalizePubkey(contact.pubkey))
-        .filter((contactPubkey): contactPubkey is string => !!contactPubkey);
-}

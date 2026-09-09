@@ -20,6 +20,9 @@
         onDone,
     }: { id: string; pubkey: string; onDone?: () => void | Promise<void> } =
         $props();
+    // A crafted link can put anything in the route parameter, which would then be
+    // signed into the `u` tag of an approval the operator is asked to confirm.
+    const invalidPubkey = $derived(!/^[0-9a-f]{64}$/.test(pubkey));
     const api = new KeycastApi();
     const user = $derived(getCurrentUser()?.user);
     let isLoading = $state(true);
@@ -35,7 +38,7 @@
     let isSaving = $state(false);
 
     $effect(() => {
-        if (!user?.pubkey || !isLoading) return;
+        if (!user?.pubkey || !isLoading || invalidPubkey) return;
         api.buildAuthHeader(`/teams/${id}`, "GET", user.pubkey)
             .then((authorization) =>
                 api.get<TeamWithRelations>(`/teams/${id}`, {
@@ -96,7 +99,14 @@
     }
 </script>
 
-{#if isLoading}
+{#if invalidPubkey}
+    <div role="alert">
+        <p class="input-error">
+            That is not a valid Nostr public key. Start from your workspace
+            instead of following the link.
+        </p>
+    </div>
+{:else if isLoading}
     <Loader />
 {:else if bunkerUri}
     <h2 class="page-header">Invitation ready</h2>

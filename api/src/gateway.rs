@@ -55,7 +55,8 @@ pub async fn forward(State(state): State<KeycastState>, request: Request<Body>) 
             .get("authorization")
             .and_then(|h| h.to_str().ok())
             .map(str::to_owned),
-        body,
+        // A browser key import travels through this body; erase it on drop.
+        body: keycast_core::v2::secret::Secret::new(body),
     };
     match state.signer.request(&request).await {
         Ok(ControlResponse::Http { reply }) => Response::builder()

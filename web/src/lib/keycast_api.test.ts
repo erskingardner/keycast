@@ -11,11 +11,13 @@ beforeEach(() => setActiveSigner({kind:"extension",pubkey,signer:{getPublicKey:a
 const originalFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = originalFetch; clearActiveSigner(); });
 function eventFrom(header: string) { return JSON.parse(Buffer.from(header.slice(6), "base64").toString("utf8")); }
-function configuration() { return Response.json({ instance_id: "test-instance", authority_revision: 4 }); }
-function encryptedReply(header: string, status: number, body: string) {
+// The signer publishes one stable reply identity; a reply from anything else is a forgery.
+const replySecret = generateSecretKey();
+const replyPublicKey = getPublicKey(replySecret);
+function configuration() { return Response.json({ instance_id: "test-instance", authority_revision: 4, management_reply_public_key: replyPublicKey }); }
+function encryptedReply(header: string, status: number, body: string, sender: Uint8Array = replySecret) {
     const approval = eventFrom(header);
     const recipient = approval.tags.find((tag: string[]) => tag[0] === "response")[1];
-    const sender = generateSecretKey();
     return Response.json({ public_key: getPublicKey(sender), encrypted_response: nip44.encrypt(JSON.stringify({status, body}), nip44.utils.getConversationKey(sender, recipient)) });
 }
 describe("management HTTP encryption and external approvals", () => {
@@ -75,6 +77,22 @@ describe("management HTTP encryption and external approvals", () => {
         expect(event.tags).toContainEqual(["instance", "test-instance"]);
         expect(event.tags.some((t:string[])=>t[0]==="response")).toBe(false);
         expect(await api.get<{ok:boolean}>("/teams", {headers:{Authorization:header}})).toEqual({ok:true});
+    });
+    test("refuses a reply encrypted by any identity other than the published one", async () => {
+        const api = new KeycastApi(); let header = "";
+        globalThis.fetch = mock(async (url: string | URL | Request) => String(url).includes("/config?") ? configuration() : encryptedReply(header, 201, '{"id":1}', generateSecretKey())) as unknown as typeof fetch;
+        header = await api.buildAuthHeader("/teams", "POST", pubkey, '{"name":"Ops"}');
+        await expect(api.post("/teams", {name:"Ops"}, {headers:{Authorization:header}})).rejects.toThrow("unexpected identity");
+    });
+    test("requires the signer to publish a management reply identity for writes", async () => {
+        globalThis.fetch = mock(async () => Response.json({instance_id:"test-instance",authority_revision:4})) as unknown as typeof fetch;
+        await expect(new KeycastApi().buildAuthHeader("/teams","POST",pubkey,'{"name":"Ops"}')).rejects.toThrow("management reply identity");
+    });
+    test("refuses to sign an approval whose description would carry private material", async () => {
+        globalThis.fetch = mock(async () => configuration()) as unknown as typeof fetch;
+        const api = new KeycastApi();
+        await expect(api.buildAuthHeader("/teams/1", "PUT", pubkey, '{"secret_key":"nsec1abc"}')).rejects.toThrow("private key material");
+        await expect(api.buildAuthHeader("/teams/1/keys", "POST", pubkey, '{"name":"nsec1pasted","secret_key":"x"}')).rejects.toThrow("private key material");
     });
     test("refuses unsafe authority revisions before requesting a signature", async () => {
         globalThis.fetch = mock(async () => Response.json({instance_id:"test",authority_revision: 9007199254740992})) as unknown as typeof fetch;

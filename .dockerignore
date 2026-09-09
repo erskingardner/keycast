@@ -1,39 +1,31 @@
-.git
-.gitignore
-.DS_Store
+# Allowlist form. Patterns without a leading ** match only the context root, so a
+# denylist silently misses paths such as legacy-v1/master.key, which UPGRADE.md
+# tells the operator to create inside the checkout. Everything is excluded here
+# and only the build inputs are added back.
+*
 
-# Rust build output
-target
+!Cargo.toml
+!Cargo.lock
+!api/
+!core/
+!signer/
+!database/migrations/
+!web/
+
+# Re-exclude anything sensitive or generated that lives under an allowed path.
 **/target
-
-# JavaScript dependencies and generated frontend output
-node_modules
 **/node_modules
 web/build
 web/.svelte-kit
-.svelte-kit
-build
-dist
-coverage
-
-# Local runtime state and secrets
-.env
-.env.*
-!.env.example
+web/test-results
+**/.env
+**/.env.*
 !**/.env.example
-master.key
-*.db
-*.db-shm
-*.db-wal
-database/*.db
-database/*.db-shm
-database/*.db-wal
-
-# Editor and OS scratch files
-*.swp
-*.swo
-Thumbs.db
-
-# Interrupted credential creation and encrypted recovery archives
-.keycast-root.*
-*.kcb
+**/master.key
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.kcb
+**/.keycast-root.*
+**/.DS_Store
+**/__pycache__

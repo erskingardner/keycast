@@ -1,4 +1,7 @@
+use crate::v2::secret::Secret;
+
 /// Only this authenticated forwarding protocol is exposed on the API socket.
+/// The body is zeroizing because a browser key import travels through it.
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ControlRequest {
@@ -6,7 +9,7 @@ pub enum ControlRequest {
         method: String,
         path: String,
         authorization: Option<String>,
-        body: String,
+        body: Secret,
     },
     Status,
 }
@@ -33,7 +36,7 @@ pub enum LifecycleRequest {
         team_id: i64,
         actor_public_key: String,
         name: String,
-        secret_key: String,
+        secret_key: Secret,
     },
     CreateGrant {
         team_id: i64,
@@ -122,6 +125,9 @@ pub struct SignerStatus {
     pub schema_version: i64,
     pub envelope_version: i64,
     pub credential_key_id: Option<String>,
+    /// Stable identity that encrypts management replies. Public, and shown so an
+    /// operator can compare the browser's pinned value against the host CLI.
+    pub management_reply_public_key: Option<String>,
     pub active_grants: i64,
     pub active_sessions: i64,
     pub claimable_invitations: i64,

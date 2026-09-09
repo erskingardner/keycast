@@ -71,7 +71,16 @@ fi
 chmod 600 .env
 
 if command -v docker >/dev/null 2>&1; then
-    docker network inspect keycast >/dev/null 2>&1 || docker network create keycast >/dev/null
+    # Internal: keycast-api and keycast-web get no route off-host. The signer uses
+    # its own egress network and the reverse proxy keeps a public one.
+    if ! docker network inspect keycast >/dev/null 2>&1; then
+        docker network create --internal keycast >/dev/null
+    elif [ "$(docker network inspect keycast --format '{{.Internal}}' 2>/dev/null)" != "true" ]; then
+        echo "Warning: the existing 'keycast' network is not internal."
+        echo "To isolate the API and web containers, recreate it after stopping the stack:"
+        echo "  docker compose -f docker-compose.prod.yml down"
+        echo "  docker network rm keycast && docker network create --internal keycast"
+    fi
 fi
 
 echo "Keycast v2 initialized for $DOMAIN."

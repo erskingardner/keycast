@@ -85,20 +85,47 @@ struct State {
     rate: Counts,
     running: Counts,
 }
+/// Global, per-client and per-grant ceilings for one admission lane.
+#[derive(Clone, Copy)]
+pub(crate) struct Limits {
+    running: (usize, usize, usize),
+    rate: (usize, usize, usize),
+}
+impl Limits {
+    /// Clients holding a live session on the target grant.
+    pub const ESTABLISHED: Self = Self {
+        running: (32, 2, 8),
+        rate: (128, 16, 32),
+    };
+    /// Everything else, including `connect` and forged traffic. A grant's
+    /// remote-signer key is public, so anyone can publish events addressed to it;
+    /// keeping that traffic in its own lane means a flood cannot consume the
+    /// budget that established sessions draw from.
+    pub const NEWCOMER: Self = Self {
+        running: (8, 2, 4),
+        rate: (32, 4, 8),
+    };
+}
+
 #[derive(Clone)]
 pub(crate) struct Admission {
     start: Instant,
+    limits: Limits,
     state: Arc<Mutex<State>>,
 }
 impl Default for Admission {
     fn default() -> Self {
-        Self {
-            start: Instant::now(),
-            state: Arc::default(),
-        }
+        Self::new(Limits::ESTABLISHED)
     }
 }
 impl Admission {
+    pub fn new(limits: Limits) -> Self {
+        Self {
+            start: Instant::now(),
+            limits,
+            state: Arc::default(),
+        }
+    }
     pub fn try_admit(&self, client: &str, grant: &str) -> Option<Ticket> {
         self.try_admit_reason(client, grant).ok()
     }
@@ -119,7 +146,7 @@ impl Admission {
         for (counts, limits, reasons) in [
             (
                 &state.running,
-                (32, 2, 8),
+                self.limits.running,
                 [
                     "admission_running_global",
                     "admission_running_client",
@@ -128,7 +155,7 @@ impl Admission {
             ),
             (
                 &state.rate,
-                (128, 16, 32),
+                self.limits.rate,
                 [
                     "admission_rate_global",
                     "admission_rate_client",
@@ -270,6 +297,32 @@ mod tests {
         assert!(state.running.clients.is_empty());
         assert!(state.running.grants.is_empty());
         assert_eq!(state.rate.total, 3);
+    }
+
+    #[test]
+    fn a_newcomer_flood_cannot_starve_established_sessions() {
+        let established = Admission::new(Limits::ESTABLISHED);
+        let newcomers = Admission::new(Limits::NEWCOMER);
+
+        // Forged events from rotating keys fill only the newcomer lane.
+        let mut admitted = 0;
+        for n in 0..512 {
+            if newcomers
+                .try_admit_at(&format!("forged-{n}"), "victim-grant", 0)
+                .is_some()
+            {
+                admitted += 1;
+            }
+        }
+        assert_eq!(admitted, Limits::NEWCOMER.running.0);
+        assert!(newcomers
+            .try_admit_at("another", "victim-grant", 0)
+            .is_none());
+
+        // The established lane is untouched and still serves the real client.
+        assert!(established
+            .try_admit_at("live-client", "victim-grant", 0)
+            .is_some());
     }
 
     #[test]

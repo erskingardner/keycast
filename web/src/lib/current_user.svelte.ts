@@ -1,8 +1,4 @@
-import {
-    loadFollowPubkeys,
-    userFromPubkey,
-    type NostrUser,
-} from "$lib/nostr";
+import { userFromPubkey, type NostrUser } from "$lib/nostr";
 
 let currentUser: CurrentUser | null = $state(null);
 
@@ -10,22 +6,8 @@ class CurrentUser {
     /** The Nostr user currently signed in through a browser, remote, or Android signer. */
     user: NostrUser | null = $state(null);
 
-    /** Array of pubkeys that the current user follows */
-    follows: string[] = $state([]);
-
     constructor(pubkey: string) {
         this.user = userFromPubkey(pubkey);
-        if (this.user) {
-            this.fetchUserFollows();
-        }
-    }
-
-    async fetchUserFollows(): Promise<string[]> {
-        if (!this.user) return [];
-
-        const follows = await loadFollowPubkeys(this.user.pubkey);
-        this.follows = follows;
-        return follows;
     }
 }
 
