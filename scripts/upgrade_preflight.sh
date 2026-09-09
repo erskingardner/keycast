@@ -28,6 +28,18 @@ env_value() {
 ALLOWED_PUBKEYS="${ALLOWED_PUBKEYS:-$(env_value ALLOWED_PUBKEYS)}"
 DOMAIN="${DOMAIN:-$(env_value DOMAIN)}"
 KEYCAST_OPERATOR_PUBKEYS="${KEYCAST_OPERATOR_PUBKEYS:-$(env_value KEYCAST_OPERATOR_PUBKEYS)}"
+# Must resolve exactly like ${KEYCAST_STATE_DIR:-.} in the Compose files, or this
+# would check and repair a stale copy while the containers mount another one.
+KEYCAST_STATE_DIR="${KEYCAST_STATE_DIR:-$(env_value KEYCAST_STATE_DIR)}"
+if [[ -z "$KEYCAST_STATE_DIR" ]]; then
+    STATE_DIR="$ROOT_DIR"
+elif [[ "$KEYCAST_STATE_DIR" = /* ]]; then
+    STATE_DIR="$KEYCAST_STATE_DIR"
+else
+    STATE_DIR="$ROOT_DIR/$KEYCAST_STATE_DIR"
+fi
+DATABASE_DIR="$STATE_DIR/database"
+ROOT_KEY="$STATE_DIR/master.key"
 KEYCAST_UID=10001
 KEYCAST_GID=10001
 failures=0
@@ -49,46 +61,66 @@ for pubkey_name in ALLOWED_PUBKEYS KEYCAST_OPERATOR_PUBKEYS; do
     fi
 done
 
-if [[ -f "$ROOT_DIR/master.key" ]]; then
-    key_value="$(tr -d '\r\n' < "$ROOT_DIR/master.key")"
-    [[ "$key_value" =~ ^[0-9a-fA-F]{64}$ || "$key_value" =~ ^[A-Za-z0-9+/]{43}=$ ]] \
-        && ok "master.key encodes exactly 32 bytes" \
-        || fail "master.key must contain one base64 or hex encoded 32-byte key"
+if [[ "$STATE_DIR" != "$ROOT_DIR" ]]; then
+    ok "state directory is $STATE_DIR"
+fi
+if [[ -f "$ROOT_KEY" ]]; then
+    key_value="$(tr -d '\r\n' < "$ROOT_KEY")"
+    if [[ "$key_value" =~ ^[0-9a-fA-F]{64}$ || "$key_value" =~ ^[A-Za-z0-9+/]{43}=$ ]]; then
+        ok "master.key encodes exactly 32 bytes"
+    else
+        fail "master.key must contain one base64 or hex encoded 32-byte key"
+    fi
 else
-    fail "master.key is missing"
+    fail "$ROOT_KEY is missing"
 fi
 
-for directory in database; do
-    [[ -d "$ROOT_DIR/$directory" ]] && ok "$directory directory exists" || fail "$directory directory is missing"
-done
+if [[ -d "$DATABASE_DIR" ]]; then
+    ok "database directory exists"
+else
+    fail "$DATABASE_DIR is missing"
+fi
 
-if [[ -f "$ROOT_DIR/database/keycast.db" ]]; then
-    warn "database/keycast.db is legacy and will be ignored by v2"
+if [[ -f "$DATABASE_DIR/keycast.db" ]]; then
+    warn "keycast.db is legacy and will be ignored by v2"
 fi
 # Read-only, and before the ownership repair below: opening a WAL database
 # read-write creates -wal/-shm sidecars, and an interrupted run would leave them
 # owned by root where the container user (10001) could not open the database.
-if [[ -f "$ROOT_DIR/database/keycast-v2.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
-    db_uri="file:$ROOT_DIR/database/keycast-v2.db?mode=ro"
-    integrity="$(sqlite3 -readonly "$db_uri" 'PRAGMA quick_check;' 2>/dev/null || true)"
-    [[ "$integrity" == "ok" ]] && ok "v2 database quick_check passed" || fail "v2 database quick_check failed"
-    schema="$(sqlite3 -readonly "$db_uri" 'PRAGMA user_version;' 2>/dev/null || true)"
-    [[ "$schema" == "2" ]] && ok "v2 schema version is 2" || fail "unexpected v2 schema version: $schema"
+# GNU form first: on Linux `stat -f` means --file-system, which would print
+# filesystem status to stdout before failing and corrupt the captured value.
+file_owner() {
+    stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null || true
+}
+if [[ -f "$DATABASE_DIR/keycast-v2.db" ]] && command -v sqlite3 >/dev/null 2>&1; then
+    # `-readonly` is the read-only guarantee. A `file:` URI would be read as a
+    # literal path wherever URI filenames are not enabled.
+    database="$DATABASE_DIR/keycast-v2.db"
+    integrity="$(sqlite3 -readonly "$database" 'PRAGMA quick_check;' 2>/dev/null || true)"
+    if [[ "$integrity" == "ok" ]]; then
+        ok "v2 database quick_check passed"
+    else
+        fail "v2 database quick_check failed"
+    fi
+    schema="$(sqlite3 -readonly "$database" 'PRAGMA user_version;' 2>/dev/null || true)"
+    if [[ "$schema" == "2" ]]; then
+        ok "v2 schema version is 2"
+    else
+        fail "unexpected v2 schema version: $schema"
+    fi
     for sidecar in wal shm; do
-        if [[ -e "$ROOT_DIR/database/keycast-v2.db-$sidecar" ]] \
-            && [[ "$(stat -f '%u' "$ROOT_DIR/database/keycast-v2.db-$sidecar" 2>/dev/null \
-                || stat -c '%u' "$ROOT_DIR/database/keycast-v2.db-$sidecar" 2>/dev/null)" != "$KEYCAST_UID" ]]; then
-            warn "database/keycast-v2.db-$sidecar is not owned by $KEYCAST_UID; --fix-permissions will repair it"
+        if [[ -e "$database-$sidecar" && "$(file_owner "$database-$sidecar")" != "$KEYCAST_UID" ]]; then
+            warn "keycast-v2.db-$sidecar is not owned by $KEYCAST_UID; --fix-permissions will repair it"
         fi
     done
 else
     warn "no v2 database yet; the signer will create it on first start"
 fi
 
-if [[ "$FIX_PERMISSIONS" == true && -f "$ROOT_DIR/master.key" ]]; then
-    chmod 700 "$ROOT_DIR/database"
-    chmod 600 "$ROOT_DIR/master.key"
-    if chown -R "$KEYCAST_UID:$KEYCAST_GID" "$ROOT_DIR/database" "$ROOT_DIR/master.key" 2>/dev/null; then
+if [[ "$FIX_PERMISSIONS" == true && -f "$ROOT_KEY" ]]; then
+    chmod 700 "$DATABASE_DIR"
+    chmod 600 "$ROOT_KEY"
+    if chown -R "$KEYCAST_UID:$KEYCAST_GID" "$DATABASE_DIR" "$ROOT_KEY" 2>/dev/null; then
         ok "container ownership and permissions updated"
     else
         fail "could not chown runtime files; retry with sudo"
@@ -114,11 +146,13 @@ for component in API SIGNER WEB; do
     # A digest only pins what you already trust. Verify it was produced by this
     # repository's workflow instead of trusting a mutable tag it was read from.
     if command -v gh >/dev/null 2>&1; then
-        if gh attestation verify "oci://${image_value}@${digest_value}" \
-            --repo "$ATTESTATION_REPO" >/dev/null 2>&1; then
+        # Always blocking. Carry the diagnostic so an authentication or network
+        # failure is not reported as if the image simply had no provenance.
+        if verify_output="$(gh attestation verify "oci://${image_value}@${digest_value}" \
+            --repo "$ATTESTATION_REPO" 2>&1)"; then
             ok "$component image digest has verified build provenance"
         else
-            fail "$component image digest has no verifiable provenance from $ATTESTATION_REPO"
+            fail "$component provenance verification failed against $ATTESTATION_REPO: $(printf '%s' "$verify_output" | tr '\n' ' ' | cut -c1-300)"
         fi
     else
         warn "gh is not installed; install it to verify $component build provenance with: gh attestation verify oci://${image_value}@${digest_value} --repo $ATTESTATION_REPO"

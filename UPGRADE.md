@@ -98,11 +98,19 @@ sudo docker network create --internal keycast
 **The reverse proxy no longer needs the Docker socket.** The previous example mounted
 `/var/run/docker.sock` into Caddy, which is root-equivalent on the host: read-only applies to the
 socket file, not to the Docker API commands sent over it. The proxy now uses a static file, and the
-`caddy=` labels have been removed from both Compose files.
+`caddy=` labels have been removed from both Compose files. Prepare and review that file before
+starting anything:
 
 ~~~sh
-cp Caddyfile.example Caddyfile   # review it, then
+cp Caddyfile.example Caddyfile
+~~~
+
+Then bring the whole stack back up and confirm it is healthy:
+
+~~~sh
+sudo docker compose -f docker-compose.prod.yml up -d
 sudo docker compose -f caddy-docker-compose-example.yml up -d
+sudo docker compose -f docker-compose.prod.yml ps
 ~~~
 
 **Management writes now pin a reply identity.** The signer derives a stable reply keypair from the
@@ -117,6 +125,22 @@ sudo docker compose -f docker-compose.prod.yml exec -T keycast-signer \
 
 **Swap is now disabled for the containers.** `memswap_limit` matches `mem_limit` so decrypted key
 material cannot be paged to host swap. No action needed, but confirm the host has enough RAM.
+
+**State can now live outside the checkout.** `KEYCAST_STATE_DIR` moves `database/` and `master.key`
+away from the working tree, so a `git` operation or a source build can never reach them. It defaults
+to the checkout, so existing deployments are unaffected. To move an existing instance, stop the
+stack, move both, and record the new location:
+
+~~~sh
+sudo docker compose -f docker-compose.prod.yml down
+sudo install -d -m 0700 -o 10001 -g 10001 /srv/keycast
+sudo mv database master.key /srv/keycast/
+echo "KEYCAST_STATE_DIR=/srv/keycast" | sudo tee -a .env
+sudo scripts/upgrade_preflight.sh --fix-permissions
+~~~
+
+`scripts/init.sh --state-dir /srv/keycast` sets this up for a fresh install, and the preflight
+resolves the same path so it never validates a stale copy.
 
 ## Future V2 Upgrades
 

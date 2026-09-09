@@ -103,41 +103,14 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Render Compose files
-        env:
-          DOMAIN: keycast.example
-          ALLOWED_PUBKEYS: "0000000000000000000000000000000000000000000000000000000000000001"
-          KEYCAST_OPERATOR_PUBKEYS: "0000000000000000000000000000000000000000000000000000000000000001"
-          KEYCAST_API_DIGEST: "sha256:1111111111111111111111111111111111111111111111111111111111111111"
-          KEYCAST_SIGNER_DIGEST: "sha256:2222222222222222222222222222222222222222222222222222222222222222"
-          KEYCAST_WEB_DIGEST: "sha256:3333333333333333333333333333333333333333333333333333333333333333"
-        run: |
-          set -euo pipefail
-          docker compose -f docker-compose.yml config --quiet
-          docker compose -f docker-compose.prod.yml config --quiet
-          docker compose -f caddy-docker-compose-example.yml config --quiet
+      - name: Check Compose hardening
+        run: bash scripts/check-compose-hardening.sh
 
-      - name: Assert the hardening defaults are present
-        env:
-          DOMAIN: keycast.example
-          ALLOWED_PUBKEYS: "0000000000000000000000000000000000000000000000000000000000000001"
-          KEYCAST_OPERATOR_PUBKEYS: "0000000000000000000000000000000000000000000000000000000000000001"
+      - name: Check shell scripts
         run: |
           set -euo pipefail
-          rendered="$(docker compose -f docker-compose.yml config)"
-          # Swap must be disabled wherever plaintext key material can live.
-          for service_limit in memswap_limit read_only; do
-            test "$(printf '%s' "$rendered" | grep -c "$service_limit")" -ge 3 \
-              || { echo "missing $service_limit on every service"; exit 1; }
-          done
-          printf '%s' "$rendered" | grep -q 'noexec,nosuid,nodev' || { echo "tmpfs is not hardened"; exit 1; }
-          # The signer must not share the ingress network with the public transport.
-          printf '%s' "$rendered" | grep -q 'keycast-signer-egress' || { echo "signer egress network missing"; exit 1; }
-          # No proxy may be handed the Docker socket.
-          ! grep -rq 'docker\.sock' docker-compose.yml docker-compose.prod.yml caddy-docker-compose-example.yml \
-            || { echo "a compose file mounts the Docker socket"; exit 1; }
-          # Secrets must never be reachable from the build context.
-          grep -q '^\*$' .dockerignore || { echo ".dockerignore is not allowlist form"; exit 1; }
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning scripts/*.sh
 
   security:
     name: Dependency security

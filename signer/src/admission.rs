@@ -304,20 +304,27 @@ mod tests {
         let established = Admission::new(Limits::ESTABLISHED);
         let newcomers = Admission::new(Limits::NEWCOMER);
 
-        // Forged events from rotating keys fill only the newcomer lane.
-        let mut admitted = 0;
-        for n in 0..512 {
-            if newcomers
-                .try_admit_at(&format!("forged-{n}"), "victim-grant", 0)
-                .is_some()
-            {
-                admitted += 1;
-            }
-        }
-        assert_eq!(admitted, Limits::NEWCOMER.running.0);
+        // Hold the tickets so concurrency actually accumulates. A dropped ticket
+        // returns its slot at once, which would leave the rate limit as the only
+        // constraint under test and make either constant look load-bearing.
+        let held: Vec<_> = (0..512)
+            .filter_map(|n| newcomers.try_admit_at(&format!("forged-{n}"), "victim-grant", 0))
+            .collect();
+        assert_eq!(held.len(), Limits::NEWCOMER.running.2);
         assert!(newcomers
             .try_admit_at("another", "victim-grant", 0)
             .is_none());
+
+        // Completed work still spends the per-grant rate budget for the window.
+        drop(held);
+        let admitted = (0..512)
+            .filter(|n| {
+                newcomers
+                    .try_admit_at(&format!("burst-{n}"), "other-grant", 1)
+                    .is_some()
+            })
+            .count();
+        assert_eq!(admitted, Limits::NEWCOMER.rate.2);
 
         // The established lane is untouched and still serves the real client.
         assert!(established

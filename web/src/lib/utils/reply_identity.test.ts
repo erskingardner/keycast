@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import {
     forgetManagementReplyKey,
     isManagementReplyKey,
@@ -23,10 +23,29 @@ function memoryStorage(): Storage {
     } as Storage;
 }
 
+/** A store that throws on every access, like a browser with site data blocked. */
+function throwingStorage(): Storage {
+    const boom = () => {
+        throw new Error("storage is disabled");
+    };
+    return {
+        get length(): number {
+            return boom();
+        },
+        clear: boom,
+        getItem: boom,
+        key: boom,
+        removeItem: boom,
+        setItem: boom,
+    } as unknown as Storage;
+}
+
 const first = "a".repeat(64);
 const second = "b".repeat(64);
 
 describe("management reply identity pinning", () => {
+    beforeEach(() => forgetManagementReplyKey(memoryStorage()));
+
     test("pins on first use and accepts the same identity afterwards", () => {
         const store = memoryStorage();
         expect(pinnedManagementReplyKey(store)).toBeNull();
@@ -82,11 +101,35 @@ describe("management reply identity pinning", () => {
         expect(verifyManagementReplyKey(second, store)).toBe(second);
     });
 
-    test("works without any storage and never throws on a missing store", () => {
+    test("retains the pin in memory when the store is missing", () => {
+        // A first use still establishes a trust anchor for the rest of the session.
         expect(verifyManagementReplyKey(first, undefined)).toBe(first);
-        expect(pinnedManagementReplyKey(undefined)).toBeNull();
+        expect(pinnedManagementReplyKey(undefined)).toBe(first);
+        expect(() => verifyManagementReplyKey(second, undefined)).toThrow(
+            "identity changed",
+        );
         expect(() => forgetManagementReplyKey(undefined)).not.toThrow();
-        expect(() => trustManagementReplyKey(first, undefined)).not.toThrow();
+        expect(pinnedManagementReplyKey(undefined)).toBeNull();
+    });
+
+    test("retains the pin in memory when every storage access throws", () => {
+        const store = throwingStorage();
+        expect(verifyManagementReplyKey(first, store)).toBe(first);
+        expect(pinnedManagementReplyKey(store)).toBe(first);
+        // Without the session pin this second, different key would be accepted
+        // as another first use and a compromised API could swap the identity.
+        expect(() => verifyManagementReplyKey(second, store)).toThrow(
+            "identity changed",
+        );
+        expect(() => trustManagementReplyKey(second, store)).not.toThrow();
+        expect(verifyManagementReplyKey(second, store)).toBe(second);
+    });
+
+    test("a persisted pin outranks a stale session pin", () => {
+        const store = memoryStorage();
+        trustManagementReplyKey(second, undefined);
+        store.setItem("keycast:management-reply-identity:v1", first);
+        expect(pinnedManagementReplyKey(store)).toBe(first);
     });
 
     test("fingerprints are short, stable and never the whole key", () => {

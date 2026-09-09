@@ -15,7 +15,14 @@
  */
 const PIN_STORAGE_KEY = "keycast:management-reply-identity:v1";
 
-/** Storage access throws in some privacy modes; treat that as "nothing pinned". */
+/**
+ * Survives a storage failure. Without this, a private mode or a full or disabled
+ * store would make every request a first use, so an API compromised mid-session
+ * could swap the identity in /config and never trip the change warning.
+ */
+let sessionPin: string | null = null;
+
+/** Storage access throws in some privacy modes; treat that as "nothing stored". */
 function browserStorage(): Storage | undefined {
     try {
         return typeof localStorage === "undefined" ? undefined : localStorage;
@@ -31,11 +38,14 @@ export function isManagementReplyKey(value: unknown): value is string {
 export function pinnedManagementReplyKey(
     store: Storage | undefined = browserStorage(),
 ): string | null {
+    let stored: string | null = null;
     try {
-        return store?.getItem(PIN_STORAGE_KEY) ?? null;
+        stored = store?.getItem(PIN_STORAGE_KEY) ?? null;
     } catch {
-        return null;
+        stored = null;
     }
+    // Persisted value wins; the session pin covers a store that cannot be read.
+    return stored ?? sessionPin;
 }
 
 export function trustManagementReplyKey(
@@ -45,20 +55,22 @@ export function trustManagementReplyKey(
     if (!isManagementReplyKey(publicKey)) {
         throw new Error("Invalid management reply identity");
     }
+    sessionPin = publicKey;
     try {
         store?.setItem(PIN_STORAGE_KEY, publicKey);
     } catch {
-        // Without storage the identity is verified per session instead of pinned.
+        // Retained for this session only; the next visit re-pins on first use.
     }
 }
 
 export function forgetManagementReplyKey(
     store: Storage | undefined = browserStorage(),
 ): void {
+    sessionPin = null;
     try {
         store?.removeItem(PIN_STORAGE_KEY);
     } catch {
-        // Nothing was pinned.
+        // Nothing was persisted.
     }
 }
 

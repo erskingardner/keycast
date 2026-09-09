@@ -45,7 +45,8 @@ Initialize a checkout:
 ```sh
 bash scripts/init.sh \
   --domain keycast.example.com \
-  --allowed-pubkeys "64-character-hex-pubkey[,another-pubkey]"
+  --allowed-pubkeys "64-character-hex-pubkey[,another-pubkey]" \
+  --state-dir /srv/keycast   # optional; keeps state out of the checkout
 # Set the three reviewed image digests in .env before production preflight/pull.
 sudo scripts/upgrade_preflight.sh --fix-permissions
 sudo docker compose -f docker-compose.prod.yml pull
@@ -65,7 +66,8 @@ network for ACME and published ports. Nothing needs inbound access to the signer
 it only through the private socket volume.
 
 The setup creates a 32-byte root key in `master.key`, mode `0600`, and assigns the database and key
-to the fixed container UID/GID `10001`. The file is mounted read-only into the signer only. V2 can
+to the fixed container UID/GID `10001`. With `--state-dir` (recorded as `KEYCAST_STATE_DIR` in
+`.env`) both live outside the checkout, so no `git` operation or source build can reach them. The file is mounted read-only into the signer only. V2 can
 also load a systemd credential from `$CREDENTIALS_DIRECTORY` when run outside Compose.
 
 Production publishes three images:

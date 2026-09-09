@@ -88,6 +88,37 @@ high-severity issue was found in application code. The findings below were fixed
 | Info | `decode_hex` accepted a leading sign, a non-regular credential file blocked startup inside a read, and the Dockerfile frontend was a mutable tag | Strict hex digits, regular-file check, digest-pinned frontend |
 | Info | `CREDENTIALS_DIRECTORY` silently won over an explicit `KEYCAST_ROOT_KEY_FILE`, and persistent state had to live inside the checkout | Setting both credential sources is rejected outright; `KEYCAST_STATE_DIR` relocates the database and root credential, defaulting to the checkout |
 
+## Review follow-up, September 9, 2026
+
+Addressed from the pull request review:
+
+- Publication now pushes to an immutable `sha-` tag, smoke-tests that exact digest, and only then
+  promotes it to `v2`/`latest` with `imagetools create`. A rebuild for publication could differ from
+  the tested image, because `apt-get install` is time-dependent when the layer cache misses.
+- The Compose hardening assertions moved into `scripts/check-compose-hardening.sh`, which inspects
+  rendered mounts instead of file text. The previous text search matched the comment documenting the
+  socket removal, so the job failed on the very configuration it was meant to accept.
+- The reply-key pin is retained in memory when browser storage is unavailable, disabled, or
+  throwing. Without that, every request became another first use and an API compromised mid-session
+  could substitute its identity without tripping the change warning.
+- The reply identity and its re-trust control now load from the unauthenticated `/config` rather
+  than the operator-only `/status`, so a team administrator who is not an instance operator can
+  still recover after a root-credential rotation.
+- `connect-src` accepts the explicitly configured API origin again, so a split-origin HTTPS
+  deployment is not blocked by the removal of the blanket `https:` source.
+- `KEYCAST_STATE_DIR` is honoured by `scripts/init.sh`, `scripts/generate_key.sh` and
+  `scripts/upgrade_preflight.sh`, so setup, validation and permission repair act on the same paths
+  Compose mounts rather than a stale copy in the checkout.
+- Preflight uses the plain database path with `sqlite3 -readonly`, tries GNU `stat -c` before the
+  BSD form, and reports the `gh attestation verify` diagnostic so an authentication or network
+  failure is not recorded as missing provenance.
+- The starvation regression waits on a new `configuration_reloads` counter instead of sleeping, and
+  the admission unit test asserts the constants that actually bind.
+- A test compares the Rust and TypeScript secret-marker lists, since the browser refuses first and a
+  marker present only in the signer would let content reach an external key store.
+- `UPGRADE.md` restarts the Keycast stack after the network is recreated; the previous ordering left
+  the signer, API and web containers stopped.
+
 Two findings from an external review were investigated and **not** reproduced as issues. Discovered
 relays do not bypass the SSRF vetting: the runtime places every discovered relay in a restricted set
 and the custom transport routes those connections through `public_relay::connect`, which re-resolves

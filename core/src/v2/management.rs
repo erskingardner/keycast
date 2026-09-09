@@ -72,6 +72,23 @@ mod tests {
             .finalize(&Keys::generate())
             .unwrap()
     }
+    /// The browser refuses to sign first, so a marker present only here would let
+    /// content the signer rejects still reach an external key store. The list is
+    /// read from the TypeScript source rather than duplicated in this test.
+    #[test]
+    fn secret_markers_match_the_browser_list() {
+        let typescript = include_str!("../../../web/src/lib/utils/management.ts");
+        let declaration = typescript
+            .lines()
+            .find(|line| line.contains("const SECRET_MARKERS"))
+            .expect("web/src/lib/utils/management.ts declares SECRET_MARKERS");
+        let browser: Vec<&str> = declaration.split('"').skip(1).step_by(2).collect();
+        assert_eq!(
+            browser, SECRET_MARKERS,
+            "the browser and signer marker lists have diverged"
+        );
+    }
+
     #[test]
     fn import_description_names_the_key_without_its_private_material() {
         let body = r#"{"name":"Personal identity","secret_key":"nsec1exampleprivatematerial"}"#;

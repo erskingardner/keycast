@@ -31,6 +31,8 @@ pub struct RuntimeState {
     pub quarantined_grants: Arc<AtomicUsize>,
     pub reload: Arc<Notify>,
     pub last_progress: Arc<AtomicU64>,
+    /// Completed configuration refreshes, including the live-session index.
+    pub configuration_reloads: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Error)]
@@ -57,6 +59,7 @@ impl RuntimeState {
             quarantined_grants: Arc::new(AtomicUsize::new(0)),
             reload: Arc::new(Notify::new()),
             last_progress: Arc::new(AtomicU64::new(progress_tick())),
+            configuration_reloads: Arc::new(AtomicU64::new(0)),
         }
     }
 
@@ -519,6 +522,7 @@ pub async fn relay_supervisor(
                             worker_events.insert(task.id(), worker_id);
                         }
                     }
+                    state.configuration_reloads.fetch_add(1, Ordering::Relaxed);
                 }
                 _ = discovery_tick.tick(), if discovery_jobs.is_empty() => {
                     let store=state.store.clone();

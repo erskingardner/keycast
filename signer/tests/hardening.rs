@@ -1048,11 +1048,18 @@ async fn forged_flood_cannot_starve_a_client_that_already_holds_a_session() {
         .await
         .unwrap();
     assert_eq!(sessions, 1);
-    // Let the runtime pick the new session up into its live-session index.
-    for _ in 0..40 {
-        state.reload.notify_waiters();
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
+    // Wait for the live-session index rather than guessing. `notify_one` retains
+    // a permit when the supervisor is busy in another branch, so the wake cannot
+    // be lost the way `notify_waiters` can.
+    let reloads = state.configuration_reloads.load(Ordering::Relaxed);
+    state.reload.notify_one();
+    tokio::time::timeout(Duration::from_secs(15), async {
+        while state.configuration_reloads.load(Ordering::Relaxed) <= reloads {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("configuration refresh rebuilds the live-session index");
 
     // Hold the authority gate so admitted workers occupy their lane, then flood
     // from rotating keys the way an attacker on a shared relay would.
