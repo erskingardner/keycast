@@ -117,7 +117,9 @@ else
     warn "no v2 database yet; the signer will create it on first start"
 fi
 
-if [[ "$FIX_PERMISSIONS" == true && -f "$ROOT_KEY" ]]; then
+# Require both paths: without the directory guard, chmod fails under `set -e`
+# and the script exits before printing the collected failure summary.
+if [[ "$FIX_PERMISSIONS" == true && -f "$ROOT_KEY" && -d "$DATABASE_DIR" ]]; then
     chmod 700 "$DATABASE_DIR"
     chmod 600 "$ROOT_KEY"
     if chown -R "$KEYCAST_UID:$KEYCAST_GID" "$DATABASE_DIR" "$ROOT_KEY" 2>/dev/null; then
@@ -125,6 +127,8 @@ if [[ "$FIX_PERMISSIONS" == true && -f "$ROOT_KEY" ]]; then
     else
         fail "could not chown runtime files; retry with sudo"
     fi
+elif [[ "$FIX_PERMISSIONS" == true ]]; then
+    fail "cannot repair permissions until $ROOT_KEY and $DATABASE_DIR both exist"
 else
     warn "permission repair not requested; use --fix-permissions before first container start"
 fi

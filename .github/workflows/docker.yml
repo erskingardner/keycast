@@ -3,10 +3,11 @@ name: Docker Images
 # Only a smoke-tested artefact reaches an operator-facing tag.
 #
 # The build is pushed once to an immutable `sha-` tag, that exact digest is
-# pulled back and smoke-tested, and only then is the same digest promoted to
-# `v2` and `latest` with `imagetools create`, which re-points tags without
-# rebuilding. A rebuild for publication could differ from the tested image:
-# `apt-get install` is time-dependent whenever the layer cache misses.
+# pulled back and smoke-tested, then attested, and only then promoted to `v2` and
+# `latest` with `imagetools create`, which re-points tags without rebuilding.
+# Promotion runs last so those tags can never resolve to a digest whose smoke
+# test or attestation failed. A rebuild for publication could differ from the
+# tested image: `apt-get install` is time-dependent when the layer cache misses.
 #
 # Operators pin a digest, and a digest only pins what you already trust, so
 # `scripts/upgrade_preflight.sh` verifies the attestation minted below.
@@ -129,23 +130,6 @@ jobs:
           docker tag "${WEB_IMAGE}@${{ steps.web.outputs.digest }}" keycast-hardening-web:local
           scripts/container-smoke.sh
 
-      # Re-point the tags at the tested digests. No rebuild, so the artefact an
-      # operator pulls from v2 is byte-identical to the one smoke-tested above.
-      - name: Promote the tested digests
-        if: github.ref == 'refs/heads/master'
-        run: |
-          set -euo pipefail
-          promote() {
-            local image="$1" digest="$2"
-            docker buildx imagetools create \
-              --tag "${image}:v2" \
-              --tag "${image}:latest" \
-              "${image}@${digest}"
-          }
-          promote "$API_IMAGE" "${{ steps.api.outputs.digest }}"
-          promote "$SIGNER_IMAGE" "${{ steps.signer.outputs.digest }}"
-          promote "$WEB_IMAGE" "${{ steps.web.outputs.digest }}"
-
       - name: Attest API build provenance
         if: github.ref == 'refs/heads/master'
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
@@ -169,6 +153,25 @@ jobs:
           subject-name: ${{ env.WEB_IMAGE }}
           subject-digest: ${{ steps.web.outputs.digest }}
           push-to-registry: true
+
+      # Last, so v2 and latest can never resolve to a digest whose attestation
+      # failed and which scripts/upgrade_preflight.sh would therefore reject.
+      # No rebuild: the artefact an operator pulls is byte-identical to the one
+      # smoke-tested above.
+      - name: Promote the tested and attested digests
+        if: github.ref == 'refs/heads/master'
+        run: |
+          set -euo pipefail
+          promote() {
+            local image="$1" digest="$2"
+            docker buildx imagetools create \
+              --tag "${image}:v2" \
+              --tag "${image}:latest" \
+              "${image}@${digest}"
+          }
+          promote "$API_IMAGE" "${{ steps.api.outputs.digest }}"
+          promote "$SIGNER_IMAGE" "${{ steps.signer.outputs.digest }}"
+          promote "$WEB_IMAGE" "${{ steps.web.outputs.digest }}"
 
       # The digests an operator copies into .env, with the verify command.
       - name: Report digests for pinning

@@ -134,12 +134,24 @@ Move the database *files*, not the `database/` directory: `database/migrations` 
 that both the image build and the Rust tests read, and relocating it breaks them. The signer reads
 migrations from inside the image, so the external directory holds only the database.
 
+The move runs inside one privileged shell. `database/` is mode `0700` owned by UID 10001, so an
+ordinary operator's shell cannot list it to expand the wildcard: bash would pass the literal
+`database/keycast-v2.db*` to `mv` and zsh would refuse outright, and the credential move and `.env`
+edit that follow would still succeed, leaving the database behind and the signer pointed at an empty
+directory. Running the whole move under `sudo bash -euc` expands the glob with the right privileges
+and stops at the first failure.
+
 ~~~sh
 sudo docker compose -f docker-compose.prod.yml down
 sudo install -d -m 0700 -o 10001 -g 10001 /srv/keycast /srv/keycast/database
-sudo mv database/keycast-v2.db* /srv/keycast/database/
-sudo mv master.key /srv/keycast/
-echo "KEYCAST_STATE_DIR=/srv/keycast" | sudo tee -a .env
+sudo bash -euc '
+  shopt -s nullglob
+  database=(database/keycast-v2.db*)
+  (( ${#database[@]} )) || { echo "no keycast-v2.db found to move"; exit 1; }
+  mv -- "${database[@]}" /srv/keycast/database/
+  mv -- master.key /srv/keycast/
+  echo "KEYCAST_STATE_DIR=/srv/keycast" >> .env
+'
 ~~~
 
 Stale `database/keycast-v2.*.lock` files can be deleted; the signer recreates them. Then validate

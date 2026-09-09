@@ -131,6 +131,22 @@ Second follow-up round:
 - That procedure also restarts the stack and verifies it, instead of ending on a validation step
   that leaves every container stopped.
 
+Third follow-up round:
+
+- Tag promotion runs after every provenance attestation. Promoting first meant a failed attestation
+  could leave `v2` and `latest` resolving to a digest that `upgrade_preflight.sh` then rejects.
+- The Compose hardening checks run against `docker-compose.prod.yml` as well as the source file.
+  Production is what operators deploy, and only the source file was being asserted.
+- The state-relocation move runs inside one privileged shell. `database/` is mode `0700` owned by
+  UID 10001, so an ordinary operator's shell cannot list it to expand the wildcard: bash passes the
+  literal pattern and zsh refuses, while the credential move and `.env` edit that followed would
+  still succeed and leave the signer pointed at an empty directory. Validated as a non-root operator
+  against the shipped mode: the block now refuses and leaves nothing half-migrated.
+- Permission repair requires the database directory to exist, so a missing directory reports a
+  failure instead of aborting under `set -e` before the summary prints.
+- `init.sh` invokes `generate_key.sh` by absolute path. The existing `cd` made this work, but the
+  absolute path cannot be broken by a later edit that moves that `cd`.
+
 Two findings from an external review were investigated and **not** reproduced as issues. Discovered
 relays do not bypass the SSRF vetting: the runtime places every discovered relay in a restricted set
 and the custom transport routes those connections through `public_relay::connect`, which re-resolves

@@ -61,7 +61,7 @@ DATABASE_DIR="$STATE_DIR/database"
 ROOT_KEY="$STATE_DIR/master.key"
 mkdir -p "$STATE_DIR"
 if [[ ! -f "$ROOT_KEY" ]]; then
-    KEYCAST_ROOT_KEY_PATH="$ROOT_KEY" bash scripts/generate_key.sh
+    KEYCAST_ROOT_KEY_PATH="$ROOT_KEY" bash "$ROOT_DIR/scripts/generate_key.sh"
 fi
 mkdir -p "$DATABASE_DIR"
 chmod 700 "$DATABASE_DIR"
