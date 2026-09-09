@@ -36,6 +36,10 @@ upgrade. Reverting application images and restoring historical state are differe
 use the [restore workflow](backup-and-recovery.md#recovery-after-loss-or-rollback) if rolling state
 back. Restore revokes old access and requires review and client reconnection.
 
+![A changed management reply identity with a browser re-trust control](images/reply-identity-change.png)
+
+*If an upgrade includes a reply-identity change, verify the fingerprint on the trusted host. This example was captured after deliberate root rotation; an ordinary restart does not rotate the root.*
+
 ## Hardening migration
 
 These changes tighten the shipped defaults and need one deliberate step each on an existing

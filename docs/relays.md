@@ -22,6 +22,10 @@ grants, a connected relay may be idle and the signer can be ready without relay 
 its initial configuration pass. A relay demanding NIP-42 authentication is unavailable for signing;
 Keycast does not use managed keys as relay-authentication identities.
 
+![Operator relay form enabling nos.lol with a minimum readiness count of one](images/relay-configuration.png)
+
+*This demo uses nos.lol as its sole enabled baseline route. Fresh installations have the defaults listed above.*
+
 ## Imported-key discovery
 
 Import queues a background lookup of the key's NIP-65 relay list; import does not wait on the
@@ -55,6 +59,10 @@ four associated active relays per key and twenty total instance relays, includin
 are allowed. Capacity exhaustion leaves candidates inactive. Removed hints retain their route for
 a 24-hour migration overlap before cleanup. Discovered subscriptions and response publication are
 scoped to the associated keys even though connections are shared.
+
+![Relay discovery controls with automatic activation unchecked](images/relay-discovery.png)
+
+*Cached NIP-65 lists and automatic route activation are separate: the demo keeps activation off.*
 
 ## Keep clients connected during changes
 
@@ -93,3 +101,7 @@ Observations normally commit every second and flush on graceful shutdown. A cras
 storage failure can lose unflushed data; a bounded pending buffer reports lost observations on
 overflow. Persisted categories exclude relay-provided free text, event IDs, payloads, private keys,
 and credentials. These diagnostics help investigation but are not an audit-log guarantee.
+
+![Expanded nos.lol diagnostics with subscription, request and reply checkpoints, counters, and recent events](images/relay-diagnostics.png)
+
+*Actual observations from the short demo run, not a relay reliability benchmark.*

@@ -20,6 +20,10 @@ The instance operator must add your public key to the instance admission allowli
 team member alone does not bypass it. A Nostr app connecting through a grant does not need its
 client public key on that management allowlist.
 
+![Sign-in dialog offering a browser extension or external remote signer](images/sign-in.png)
+
+*Choose the external signer that holds your management identity.*
+
 ## Connect your first app
 
 1. **Sign in.** Open the instance in your browser and connect your external signer.
@@ -27,14 +31,14 @@ client public key on that management allowlist.
    the management-reply fingerprint against the trusted host before relying on the first-use pin.
 2. **Create or open a team.** A team groups keys, policies, and members. A personal instance can
    use a single team. The creator becomes its administrator; the following steps require that role.
-3. **Import a key.** Open **Keys** and choose **Import a key**. Give it a name and supply an nsec
+3. **Import a key.** Open **Keys** and choose **Import key**. Give it a name and supply an nsec
    or hex private key. Browser import gives the page and API access to that key during import;
    [trusted CLI import](operations.md#key-import) avoids that path. Start with a disposable key
    while learning the workflow.
 4. **Create a policy.** In **Policies**, allow only the operations your app needs. For a simple
    posting test, allow event kind `1`; reactions also need kind `7`. Other features may need other
    kinds or encryption permissions. See [policy examples](policies-and-access.md#policy-examples).
-5. **Connect an app.** Open the key and choose **Connect an app**. Name the client or purpose,
+5. **Connect an app.** Open the key and choose **Connect app**. Name the client or purpose,
    select the policy, and choose any grant expiration and the invitation validity period.
 6. **Copy the invitation.** Keycast displays the `bunker://` URL once. Paste it into your app's
    Nostr Connect, remote signer, or bunker login field before it expires. Treat the complete URL
@@ -46,6 +50,20 @@ client public key on that management allowlist.
 Pairing consumes the invitation and establishes a session tied to that client's public key.
 The invitation is not a reusable login link for all your devices. Ordinary signer restarts preserve
 sessions; clients must retain their own connection identity to resume them.
+
+### What pairing looks like
+
+![Import form with a descriptive key name and an empty private-key field](images/import-key.png)
+
+*Name the identity you are importing. The private-key field is deliberately empty here.*
+
+![Connect an app form with a grant name, invitation lifetime, and policy selection](images/connect-app.png)
+
+*Choose a policy for this app and a limited time to claim its invitation.*
+
+![Invitation ready notice with the complete bunker URL masked](images/invitation.png)
+
+*The invitation appears once. Its complete URL is hidden in this screenshot.*
 
 ## Add another device or change access
 

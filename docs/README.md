@@ -3,6 +3,13 @@
 Keycast lets Nostr apps request signatures and permitted encryption operations from keys hosted
 on your server. Start with the guide that matches what you are doing.
 
+[Take the screenshot tour](screenshots.md) to see signing access, team administration, mobile layouts,
+and instance operations with a populated demo.
+
+![Lighthouse Studio demo workspace with three keys](images/workspace.png)
+
+*Screenshots throughout these guides use fictional profiles in an isolated instance.*
+
 ## Use Keycast
 
 - [Getting started](getting-started.md): sign in, import a key, and pair your first app.

@@ -10,6 +10,10 @@ Keycast keeps your Nostr keys on your server and handles signing requests over N
 and revoke its access when you need to. It is built for personal accounts, families,
 and small teams running one instance on one host.
 
+![Keycast workspace with three hosted identities, profile avatars, policies, and team navigation](docs/images/workspace.png)
+
+*A team workspace with fictional demo identities. [Take the screenshot tour](docs/screenshots.md).*
+
 ## Start here
 
 | I want to… | Start with… |

@@ -34,6 +34,10 @@ Schedule the command with the host's service manager, upload the resulting encry
 chosen off-host store, and alert on job failure/backup age. A local file is not disaster protection
 against loss of the VM. Deployment does not automatically configure an upload destination or enable host timers.
 
+![Database status showing the last local backup alongside signer and activity counts](images/backup-status.png)
+
+*The demo after a successful encrypted online backup. This timestamp does not establish an off-host copy.*
+
 ## Recovery after loss or rollback
 
 An ordinary restart preserves sessions. Restoring an older backup is different: it can resurrect
@@ -48,6 +52,10 @@ The destination must not exist. Restore checks authentication, schema, root-key 
 integrity. It creates a new instance identity, clears old request caches/approvals, revokes all old
 grants/invitations/sessions, and sets a recovery hold. The directory contains `keycast-v2.db` and
 `root.key`. A failed restore retains `RESTORE_INCOMPLETE`; the daemon refuses to start it.
+
+![Restored signer marked Not ready and Signing paused for restore review with zero active grants and sessions](images/recovery-hold.png)
+
+*A real restore of the demo archive: signing stays paused and old client access is revoked until review and fresh pairing.*
 
 Review restored team administrators, policy documents, relay settings, and the host allowlists.
 Management remains available during the hold so external administrators can repair state. Stop the
@@ -75,6 +83,10 @@ root; both files are retained for recovery. The management reply identity also c
 status and re-trust it in each browser using the **Instance** page. See
 [management approvals](security.md#management-approvals). Take and verify a new backup before retiring the old key.
 Rotation after compromise does not undo disclosure of plaintext keys or old backups.
+
+![Management reply identity warning after rotating the demo root credential](images/reply-identity-change.png)
+
+*Root rotation produces a new reply identity. Verify it against the trusted host before using the re-trust control.*
 
 ## Automating off-host backups
 

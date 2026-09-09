@@ -110,3 +110,20 @@ operator, and system explanations in the main `docs/` directory. Put contributor
 and dated decisions, plans, audit evidence, and experiments in [history/](history/README.md).
 Update the relevant index and inbound links when moving documents. Preserve historical outcomes
 and limitations instead of rewriting old reports as current deployment claims.
+
+### Updating screenshots
+
+The [screenshot tour](../screenshots.md#about-these-captures) records the capture revision and demo
+setup. Keep screenshots in `docs/images/` and place them beside the behavior they explain.
+Use an isolated database and fresh disposable keys, give profiles clearly fictional names and
+avatars, and populate state through signed management requests. Exercise real NIP-46 connections
+before illustrating session counts, and use actual CLI backups, rotation, or restore to show those states.
+
+Capture the running UI at desktop and mobile widths after fonts and avatars load. Use a separate
+authenticated browser session to show member permissions. Leave private-key fields empty and mask
+the complete invitation URL at capture time. Review every image, include descriptive alt text,
+and update the tour's provenance and image links when replacing captures.
+
+<a href="../images/workspace-mobile.png"><img src="../images/workspace-mobile.png" alt="The populated team workspace at a 390-pixel mobile viewport" width="300"></a>
+
+*The same workspace at a mobile width. Capture responsive layouts alongside desktop views.*

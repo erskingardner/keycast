@@ -20,6 +20,10 @@ The communication key in a bunker URL is distinct from the hosted identity an ap
 The client also has its own connection key. A session authorizes that client to use the hosted
 identity within the grant's policy; none of these identifiers should be treated as interchangeable.
 
+![Expanded key showing its profile, cached relay list, active sessions, and a revoked grant](images/key-access.png)
+
+*Each app or purpose has its own access entry; sessions show which grants have been paired.*
+
 ## Management roles
 
 The host's `ALLOWED_PUBKEYS` list controls admission to management. Within that boundary:
@@ -33,6 +37,10 @@ Creating a team makes its creator an administrator. A team must retain at least 
 Adding a member does not add them to the host allowlist, and removing management membership should
 not be treated as a substitute for revoking client grants. App access follows the grant/session
 lifecycle below. All these rules are enforced in the signer, independently of UI controls.
+
+![Team members showing two administrators and one member](images/members.png)
+
+*The demo team has two administrators and a member. [Compare the member view](screenshots.md#teams-and-roles).*
 
 ## Policy examples
 
@@ -81,6 +89,10 @@ management. The authoritative parser is [policy.rs](../core/src/v2/policy.rs).
 Clients may request a narrower capability list when connecting. Such a list can only reduce
 what the server policy permits; it cannot widen access. A missing client restriction still leaves
 the full server policy in force.
+
+![Private messages policy editor allowing kinds 14 and 1059 and separate NIP-44 encrypt and decrypt operations](images/policy-editor.png)
+
+*A separate messaging example allows kinds 14 and 1059 plus NIP-44 operations with any peer. Choose only the capabilities your client needs.*
 
 ## Expiry, updates, and revocation
 

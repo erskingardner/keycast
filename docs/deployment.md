@@ -159,6 +159,10 @@ API availability and signing readiness are separate. Relay acknowledgement prove
 a relay; successful receipt in the client is a separate check. See [Operations](operations.md)
 and [Relays](relays.md) when diagnosing failures.
 
+![Operator instance status with matching reply identities, signer ready, backup timestamp, and activity counts](images/instance-status.png)
+
+*A populated demo after pairing two clients and taking a local backup. This demo enables only nos.lol; counters describe that run.*
+
 ## Keep the instance recoverable
 
 Preserve `database/` and its matching `master.key` in the configured state directory; never regenerate the credential for an existing

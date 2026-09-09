@@ -45,6 +45,10 @@ Root credential rotation changes the reply identity. The **Instance** page expos
 and re-trust control even for team administrators who cannot view operator status. Verify against
 the trusted host before accepting a changed identity. Do not clear a pin just to silence a warning.
 
+![Browser warning that the signer reply identity differs from its trusted pin](images/reply-identity-change.png)
+
+*The browser detects the identity change after an actual root rotation in the demo.*
+
 ## Key import and storage
 
 Browser import is an explicit trust choice. The private key passes through the page and API during

@@ -19,6 +19,10 @@ The production build uses the official `adapter-node` and runs on Node 24.
 For user and operator guides, see [the documentation index](../docs/README.md). For local setup
 and workspace validation, see [Development](../docs/development/README.md).
 
+![Populated Keycast team workspace with profile avatars](../docs/images/workspace.png)
+
+*See the [screenshot tour](../docs/screenshots.md) for forms, roles, mobile, and operator states.*
+
 ## Team links
 
 Teams have persistent name-based URLs such as `/teams/personal`. The signer assigns globally

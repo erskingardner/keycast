@@ -31,6 +31,10 @@ After a root rotation, compare the management-reply identity reported by the tru
 the browser before using the **Instance** page to trust it again. See
 [management approvals](security.md#management-approvals).
 
+![Instance status showing readiness, database health, management reply identity, and resource counts](images/instance-status.png)
+
+*Use Instance for signer health and global configuration. See the [operator screenshot tour](screenshots.md#instance-operations) for the remaining panels.*
+
 ## Running host commands
 
 For a running production container, query redacted status from the repository root:
@@ -165,6 +169,10 @@ Set `status_command` to `docker compose -f docker-compose.prod.yml exec -T keyca
 a host binary; prefer that model for the [sandboxed systemd jobs](systemd/README.md). Giving their
 service account access to the Docker daemon is root-equivalent and defeats the systemd isolation.
 Adapt the account and filesystem permissions to the actual deployment.
+
+![Team Activity table showing signed policy and grant changes with actor profiles](images/activity.png)
+
+*Team Activity shows retained actions and their outcomes; the audit export below is for host workflows.*
 
 ## Audit export
 

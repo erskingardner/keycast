@@ -91,6 +91,10 @@ the session, and append a redacted audit event. A retry from the same client is 
 interrupted successful claim; another client cannot reuse the secret. Revoking a grant ends its
 sessions and unclaimed invitations. `logout` ends only the caller's session.
 
+![Key detail panel connecting a hosted identity to policies, grants, and client sessions](images/key-access.png)
+
+*The access model in the UI: one hosted identity, separate grants, and paired client sessions.*
+
 ## Request lifecycle
 
 For each kind-24133 event, the signer:
