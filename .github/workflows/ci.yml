@@ -28,10 +28,11 @@ jobs:
         with:
           persist-credentials: false
 
+      # The SHA below is the tip of this action's `1.96.0` branch, which is where
+      # it reads the version from; there is no `toolchain` input to pass.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
         with:
-          toolchain: "1.96.0"
           components: rustfmt
 
       - name: Cache Rust build artifacts
@@ -122,10 +123,9 @@ jobs:
         with:
           persist-credentials: false
 
+      # Pinned to the tip of the action's `1.96.0` branch; see the Rust job above.
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@ebb3d1676050bfd0971c36c1e215b5751473994d # 1.96.0
-        with:
-          toolchain: "1.96.0"
 
       - name: Install cargo-audit
         run: cargo install cargo-audit --locked --version 0.22.0
