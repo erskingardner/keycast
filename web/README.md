@@ -1,18 +1,23 @@
 # Keycast Web
 
 The SvelteKit UI manages teams, imported keys, strict policies, grants, one-time invitations, relay
-configuration, and operational status. It asks an external Nostr signer to create every NIP-98
-authorization event.
+configuration, and operational status. It asks an external Nostr signer to approve management writes with private kind 27236
+and reads with instance-bound kind 27237. Management write replies use a stable root-derived
+sender identity pinned in the browser; changes require verification against trusted host status.
 
 Sign-in supports NIP-07 browser extensions, Amber/NIP-55 clipboard signing, and NIP-46 remote
-signers. The browser never stores a managed private key. The `keycastUserPubkey` cookie is only a
-route hint; the API is the authorization boundary.
+signers. Browser import temporarily handles a managed private key; the form clears it and does not
+intentionally persist it in browser storage. The `keycastUserPubkey` cookie is only a
+route hint; the signer management router is the authorization boundary.
 
 `VITE_DOMAIN` may point local development at a different API origin. Production defaults to the
 current origin and Caddy routes `/api/*`. All `VITE_*` values are public and must never contain
 secrets.
 
 The production build uses the official `adapter-node` and runs on Node 24.
+
+For user and operator guides, see [the documentation index](../docs/README.md). For local setup
+and workspace validation, see [Development](../docs/development/README.md).
 
 ## Team links
 
@@ -86,7 +91,7 @@ bun pm scan
 bun pm untrusted
 ~~~
 
-Keep NIP-98 body bytes synchronized with the signed payload hash, keep Rust/TypeScript policy shapes
+Keep management request body bytes synchronized with the signed payload hash, keep Rust/TypeScript policy shapes
 identical, and run check plus build for security-sensitive UI changes.
 
 ## License

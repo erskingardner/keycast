@@ -158,6 +158,6 @@ The trusted CLI creates consistent online encrypted backups that include the roo
 streaming authenticated chunks bound to an encrypted manifest and unique archive identity.
 Restoring an older backup revokes all prior grants, invitations and sessions, creates a new instance
 identity and holds signing until an explicit review. Offline root rotation atomically rewraps all
-active and revoked envelopes. See [V2_OPERATIONS.md](V2_OPERATIONS.md) for commands and limits.
+active and revoked envelopes. See [the current operations guide](../../operations.md) for commands and limits.
 Upload-verification, retention and monitoring job templates are provided. Choosing off-host storage,
 enabling the jobs/alert receiver, independent review and public-relay soak remain deployment work.

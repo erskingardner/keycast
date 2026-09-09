@@ -1,7 +1,7 @@
-# V2 follow-up
+# Keycast follow-up
 
 The locally implementable audit hardening and expanded test suite are tracked in
-`docs/V2_AUDIT_CLOSURE.md`.
+[V2_AUDIT_CLOSURE.md](docs/development/history/V2_AUDIT_CLOSURE.md).
 
 September 9 decision: finish the soak phase and move toward normal personal use.
 No further timed soaks are planned. The remaining reliability findings stay tracked
@@ -9,23 +9,23 @@ as follow-ups; completed soak evidence does not close independent review or reco
 Fresh-install signing defaults are nos.lol, Primal and Damus; Ditto and Bucket are excluded.
 
 September 9 second review pass: the high and medium findings from the signer, web, crypto and
-deployment reviews are fixed and covered by tests. See the second-pass table in `AUDIT.md`.
+deployment reviews are fixed and covered by tests. See the [second-pass table](docs/development/history/V2_AUDIT.md#second-review-pass-september-9-2026).
 The container network is now internal and the reverse proxy no longer takes the Docker socket, so
-an existing deployment needs the one-time steps in the "Hardening migration" section of
-`UPGRADE.md`.
+an existing deployment needs the one-time steps in
+[Hardening migration](docs/upgrading.md#hardening-migration).
 
 Remaining deployment and independent validation work:
 
 - [ ] Independent review of management kind 27236, signer authorization, NIP-46, envelope encryption,
   and trusted CLI backup/restore/rotation.
 - [x] Rehearse Caddy/TLS and the exact digest-pinned stack on the target disposable VM.
-  Deployed and verified September 6, 2026; see `docs/VM_TEST_RUN_2026-09-06.md`.
+  Deployed and verified September 6, 2026; see [VM_TEST_RUN_2026-09-06.md](docs/development/history/VM_TEST_RUN_2026-09-06.md).
 - [x] Complete the planned public-relay soak runs and review their outcomes.
   Further soaks are not planned following the September 9 decision.
   The corrected 24-hour sampled workload passed all 279 runs; remaining relay/admission
-  findings and coverage limits are in `docs/SOAK_RESULTS_2026-09-08.md`.
+  findings and coverage limits are in [SOAK_RESULTS_2026-09-08.md](docs/development/history/SOAK_RESULTS_2026-09-08.md).
   The subsequent relay-discovery soak completed with 277/278 runs passing, one
-  reply timeout and eight Ditto admission rejections; see `docs/SOAK_RESULTS_2026-09-09.md`.
+  reply timeout and eight Ditto admission rejections; see [SOAK_RESULTS_2026-09-09.md](docs/development/history/SOAK_RESULTS_2026-09-09.md).
 - [ ] Rehearse real host power-loss/storage-fault recovery; local process-kill, relay and SQLite-full tests are implemented.
 - [ ] Track the initial-ping reply timeout and Ditto `admission_running_client` burst as
   reliability follow-ups; add bounded delivery tracing if needed during normal usage.
@@ -34,8 +34,8 @@ Remaining deployment and independent validation work:
 - [x] Add cached NIP-65 discovery on import with operator-controlled activation, network-destination
   restrictions and per-key routing. Protocol relay switching is tested; Jumble automatic
   adoption remains a client compatibility limitation (keep baseline routes available). Investigation and proposed
-  ordering: `docs/RELAY_INVESTIGATION_2026-09-08.md`. VM rollout and the new scoped-relay
-  workload: `docs/RELAY_ROLLOUT_2026-09-08.md`.
+  ordering: [RELAY_INVESTIGATION_2026-09-08.md](docs/development/history/RELAY_INVESTIGATION_2026-09-08.md). VM rollout and the new scoped-relay
+  workload: [RELAY_ROLLOUT_2026-09-08.md](docs/development/history/RELAY_ROLLOUT_2026-09-08.md).
 - [ ] Complete the VM key-operation matrix below, including encryption/decryption rather than signing alone.
 - [ ] Select off-host backup storage and enable the provided encrypted upload/verification/retention and age-monitoring jobs.
 - [ ] Connect the provided capacity/readiness monitor to an external alert receiver. Proxy body and
@@ -47,7 +47,7 @@ Remaining deployment and independent validation work:
 Implemented locally: signer-owned SQLite/ACLs, external same-key approvals, encrypted invitation
 replies, bounded durable inbox/outbox, atomic logout, real subscription readiness, corrupt-grant
 isolation, first-ACK publication, trusted key import, encrypted backup/restore and root rotation.
-See `AUDIT.md`, `docs/V2_OPERATIONS.md`, and `docs/V2_VALIDATION.md` for boundaries and evidence.
+See [AUDIT.md](AUDIT.md), [operations.md](docs/operations.md), and [V2_VALIDATION.md](docs/development/history/V2_VALIDATION.md) for boundaries and evidence.
 
 ## VM key-operation acceptance and soak coverage
 
