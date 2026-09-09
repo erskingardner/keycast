@@ -7,6 +7,60 @@ const PUBKEY_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 const PUBKEY_C: &str = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
 const PUBKEY_D: &str = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 
+#[tokio::test]
+async fn current_relay_defaults_preserve_existing_grants_and_custom_configuration() {
+    for scenario in ["fresh", "existing_grant", "custom"] {
+        let pool = setup_database().await;
+        for migration in [
+            include_str!("../../database/migrations/0002_team_slugs.sql"),
+            include_str!("../../database/migrations/0003_relay_reliability.sql"),
+            include_str!("../../database/migrations/0004_key_relay_discovery.sql"),
+        ] {
+            raw_sql(migration).execute(&pool).await.unwrap();
+        }
+        if scenario == "existing_grant" {
+            let team = insert_team(&pool, "Existing team").await;
+            let key = insert_stored_key(&pool, team, PUBKEY_A).await;
+            let policy = insert_policy(&pool, team, "Policy").await;
+            insert_grant(&pool, team, key, policy, PUBKEY_B)
+                .await
+                .unwrap();
+        } else if scenario == "custom" {
+            query("UPDATE relays SET url='wss://relay.example' WHERE url='wss://relay.primal.net'")
+                .execute(&pool)
+                .await
+                .unwrap();
+        }
+        raw_sql(include_str!(
+            "../../database/migrations/0005_default_signing_relays.sql"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let urls: Vec<String> = query_scalar("SELECT url FROM relays ORDER BY sort_order")
+            .fetch_all(&pool)
+            .await
+            .unwrap();
+        assert_eq!(
+            urls,
+            [
+                "wss://nos.lol",
+                if scenario == "custom" {
+                    "wss://relay.example"
+                } else {
+                    "wss://relay.primal.net"
+                },
+                if scenario == "fresh" {
+                    "wss://relay.damus.io"
+                } else {
+                    "wss://bucket.coracle.social"
+                },
+            ],
+            "{scenario}"
+        );
+    }
+}
+
 async fn setup_database() -> SqlitePool {
     let pool = SqlitePoolOptions::new()
         .max_connections(1)

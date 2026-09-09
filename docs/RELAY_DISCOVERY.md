@@ -48,8 +48,14 @@ wrapper also does not explicitly call it. This is not a claim that every deploye
 Jumble version behaves identically. Do not remove its existing routes on an assumed
 migration. Protocol-harness relay switching is tested separately.
 
-Fresh databases without grants replace the Ditto default with Coracle's relay;
-existing instances with grants keep their relay configuration through migration.
+Fresh-install signing defaults are `wss://nos.lol`, `wss://relay.primal.net`, and
+`wss://relay.damus.io`. The frontend uses the same set for signing bootstrap and
+default publication. Ditto and Bucket are excluded. A forward migration updates
+the untouched bootstrap set before any grant exists; configured sets and existing
+client routes are preserved.
+
+Bucket was useful in the transport tests below, but its advertised 30-second
+retention makes it unsuitable as a general metadata fallback. It is not a default.
 VM qualification: Coracle and Damus each passed five ACK-and-delivery checks;
 relay.nsec.app timed out on all five connection attempts. These short probes do
 not establish long-term reliability. Existing clients retain the old endpoints

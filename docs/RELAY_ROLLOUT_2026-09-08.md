@@ -103,5 +103,6 @@ Harness revision: `d0caf3d6535286ae726c1129c6fabeb78ad7acb1`; file SHA256:
 `a892317710da8217d3fb9823886a0635aaca8f27b1d744bed6c41eb9f6b8e682`.
 Runtime remains pinned to the independently validated `a942648` images above.
 The existing completion reminder was updated for September 9 at 12:45 Europe/Rome.
-The 24-hour result is pending; this rollout is not a completed soak or an
-independent security certification.
+The window is now complete: 277/278 runs passed, with one unresolved ping
+timeout. See [the September 9 results](SOAK_RESULTS_2026-09-09.md). This is not
+an independent security certification.

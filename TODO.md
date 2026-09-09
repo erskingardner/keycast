@@ -1,15 +1,28 @@
 # V2 follow-up
 
 The locally implementable audit hardening and expanded test suite are tracked in
-`docs/V2_AUDIT_CLOSURE.md`. Deployment and independent validation remain, in priority order:
+`docs/V2_AUDIT_CLOSURE.md`.
+
+September 9 decision: finish the soak phase and move toward normal personal use.
+No further timed soaks are planned. The remaining reliability findings stay tracked
+as follow-ups; completed soak evidence does not close independent review or recovery work.
+Fresh-install signing defaults are nos.lol, Primal and Damus; Ditto and Bucket are excluded.
+
+Remaining deployment and independent validation work:
 
 - [ ] Independent review of management kind 27236, signer authorization, NIP-46, envelope encryption,
   and trusted CLI backup/restore/rotation.
 - [x] Rehearse Caddy/TLS and the exact digest-pinned stack on the target disposable VM.
   Deployed and verified September 6, 2026; see `docs/VM_TEST_RUN_2026-09-06.md`.
-- [ ] Multi-day public-relay soak and real host power-loss/storage-fault rehearsal; local process-kill, relay and SQLite-full tests are implemented.
+- [x] Complete the planned public-relay soak runs and review their outcomes.
+  Further soaks are not planned following the September 9 decision.
   The corrected 24-hour sampled workload passed all 279 runs; remaining relay/admission
   findings and coverage limits are in `docs/SOAK_RESULTS_2026-09-08.md`.
+  The subsequent relay-discovery soak completed with 277/278 runs passing, one
+  reply timeout and eight Ditto admission rejections; see `docs/SOAK_RESULTS_2026-09-09.md`.
+- [ ] Rehearse real host power-loss/storage-fault recovery; local process-kill, relay and SQLite-full tests are implemented.
+- [ ] Track the initial-ping reply timeout and Ditto `admission_running_client` burst as
+  reliability follow-ups; add bounded delivery tracing if needed during normal usage.
 - [x] Separate bounded cached-response retry handling from fresh-request admission and test
   reconnect bursts with concurrent fresh work; retain timeout-phase and rejection-limit counters.
 - [x] Add cached NIP-65 discovery on import with operator-controlled activation, network-destination
