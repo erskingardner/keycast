@@ -3,6 +3,7 @@
     import Header from "$lib/components/Header.svelte";
     import { getCurrentUser, setCurrentUser } from "$lib/current_user.svelte";
     import { initApi } from "$lib/keycast_api.svelte";
+    import { untrack } from "svelte";
     import { Toaster } from "svelte-hot-french-toast";
 
     let { data, children } = $props();
@@ -10,9 +11,14 @@
     initApi();
 
     $effect(() => {
-        if (keycastCookie && getCurrentUser()?.user?.pubkey !== keycastCookie) {
-            setCurrentUser(keycastCookie);
-        }
+        const pubkey = keycastCookie ?? null;
+        // Only refreshed server data should hydrate the user. Tracking local
+        // sign-out here would restore the user from the previous cookie value.
+        untrack(() => {
+            if ((getCurrentUser()?.user?.pubkey ?? null) !== pubkey) {
+                setCurrentUser(pubkey);
+            }
+        });
     });
 </script>
 

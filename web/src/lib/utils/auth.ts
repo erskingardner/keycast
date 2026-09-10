@@ -52,7 +52,10 @@ export async function completeSignin(
         if (!alreadySignedIn) {
             toast.success("Signed in successfully");
         }
-        await goto(signinDestination(new URLSearchParams(window.location.search).get("returnTo")));
+        await goto(
+            signinDestination(new URLSearchParams(window.location.search).get("returnTo")),
+            { invalidateAll: true },
+        );
     }
     return signedInUser;
 }
@@ -86,10 +89,10 @@ async function userFromSigninMethod(
 /**
  * Signs the user out.
  */
-export function signout() {
+export async function signout() {
     clearActiveSigner();
     setCurrentUser(null);
     document.cookie = "keycastUserPubkey=; max-age=0; SameSite=Lax; Secure; path=/";
     toast.success("Signed out");
-    goto("/");
+    await goto("/", { invalidateAll: true });
 }
