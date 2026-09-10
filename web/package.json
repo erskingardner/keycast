@@ -16,7 +16,7 @@
 		"@sveltejs/adapter-node": "^5.5.7",
 		"@sveltejs/vite-plugin-svelte": "7.3.0",
 		"@tailwindcss/postcss": "4.3.3",
-		"@types/bun": "1.4.0",
+		"@types/bun": "1.4.1",
 		"@typescript/native": "npm:typescript@7.0.2",
 		"postcss": "8.5.28",
 		"rollup": "4.63.1",
