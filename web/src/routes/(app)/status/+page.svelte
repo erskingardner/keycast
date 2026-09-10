@@ -1,4 +1,5 @@
 <script lang="ts">
+    import { softwareVersion, buildRevision } from "$lib/version";
     import RelayHealthRow from "$lib/components/RelayHealthRow.svelte";
     import Loader from "$lib/components/Loader.svelte";
     import { getCurrentUser } from "$lib/current_user.svelte";
@@ -280,6 +281,10 @@
                 Last local backup: {formattedUnixDateTime(
                     status.signer.resources.last_backup_at,
                 )}
+            </p>
+            <p class="text-sm text-muted">
+                Signer {status.signer.software_version || "unknown"} · {status.signer.build_revision?.slice(0, 12) || "unknown"}<br />
+                Web {softwareVersion} · {buildRevision.slice(0, 12)}
             </p>
             <p class="text-sm text-muted">
                 Schema v{status.signer.schema_version}, envelope v{status.signer

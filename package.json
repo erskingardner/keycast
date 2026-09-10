@@ -1,7 +1,7 @@
 {
 	"name": "keycast",
 	"private": true,
-	"version": "0.1.0",
+	"version": "2.0.0-rc.1",
 	"description": "Keycast is a secure key management system for teams on Nostr.",
 	"scripts": {
 		"dev": "concurrently -n 'rust,web,signer' -c 'blue,green,yellow' \"bun run dev:api\" \"bun run dev:web\" \"bun run dev:signer\"",

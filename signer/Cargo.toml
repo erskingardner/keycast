@@ -2,7 +2,7 @@
 name = "keycast_signer"
 description = "A Nostr remote signing daemon for the keycast application"
 authors = ["Keycast Authors"]
-version = "0.1.0"
+version.workspace = true
 edition = "2021"
 
 # One multiplexed signer owns all active grants and relay connections.

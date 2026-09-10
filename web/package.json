@@ -1,7 +1,7 @@
 {
 	"name": "keycast-web",
 	"private": true,
-	"version": "0.1.0",
+	"version": "2.0.0-rc.1",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",

@@ -6,6 +6,8 @@ Start with [AGENTS.md](../../AGENTS.md) for repository rules and the
 [architecture](../architecture.md) for process and authorization boundaries. [TODO.md](../../TODO.md)
 tracks open work. Use disposable keys for development.
 
+The [release runbook](releases.md) covers SemVer, candidate validation, publication, and rollback.
+
 ## Local setup
 
 The CI toolchain uses Rust 1.96 and Bun 1.3.9. Local development also needs `cargo-watch`, OpenSSL,

@@ -1,16 +1,6 @@
 name: Docker Images
 
-# Only a smoke-tested artefact reaches an operator-facing tag.
-#
-# The build is pushed once to an immutable `sha-` tag, that exact digest is
-# pulled back and smoke-tested, then attested, and only then promoted to `v2` and
-# `latest` with `imagetools create`, which re-points tags without rebuilding.
-# Promotion runs last so those tags can never resolve to a digest whose smoke
-# test or attestation failed. A rebuild for publication could differ from the
-# tested image: `apt-get install` is time-dependent when the layer cache misses.
-#
-# Operators pin a digest, and a digest only pins what you already trust, so
-# `scripts/upgrade_preflight.sh` verifies the attestation minted below.
+# Master produces a tested candidate bundle. Only release.yml moves release tags.
 
 on:
   push:
@@ -34,11 +24,12 @@ env:
 
 jobs:
   build:
-    name: Build, smoke, and publish v2 images
+    name: Build and verify Linux AMD64 candidate images
     runs-on: ubuntu-latest
 
     permissions:
       contents: read
+      actions: read
       packages: write
       # Required to mint the provenance attestations below.
       id-token: write
@@ -50,6 +41,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Check product version
+        id: version
+        run: echo "version=$(python3 scripts/releases/release.py check-version)" >> "$GITHUB_OUTPUT"
+
+      - name: Require the complete CI workflow for this commit
+        if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/releases/release.py wait-ci --sha "$GITHUB_SHA"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
 
@@ -58,9 +59,9 @@ jobs:
       - name: Build all runtime targets locally
         run: |
           set -euo pipefail
-          docker buildx build --load --target api-runtime --tag keycast-hardening-api:local .
-          docker buildx build --load --target signer-runtime --tag keycast-hardening-signer:local .
-          docker buildx build --load --target web-runtime --tag keycast-hardening-web:local .
+          docker buildx build --platform linux/amd64 --build-arg KEYCAST_VERSION=${{ steps.version.outputs.version }} --build-arg KEYCAST_BUILD_REVISION="$GITHUB_SHA" --load --target api-runtime --tag keycast-hardening-api:local .
+          docker buildx build --platform linux/amd64 --build-arg KEYCAST_VERSION=${{ steps.version.outputs.version }} --build-arg KEYCAST_BUILD_REVISION="$GITHUB_SHA" --load --target signer-runtime --tag keycast-hardening-signer:local .
+          docker buildx build --platform linux/amd64 --build-arg KEYCAST_VERSION=${{ steps.version.outputs.version }} --build-arg KEYCAST_BUILD_REVISION="$GITHUB_SHA" --load --target web-runtime --tag keycast-hardening-web:local .
 
       - name: Smoke test the local build
         run: scripts/container-smoke.sh
@@ -73,48 +74,59 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Compute the immutable tag
+      - name: Compute the unique candidate tag
         if: github.ref == 'refs/heads/master'
         id: tags
-        run: echo "short_sha=${GITHUB_SHA:0:12}" >> "$GITHUB_OUTPUT"
+        run: echo "candidate=sha-${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "$GITHUB_OUTPUT"
 
-      # Push to the immutable sha- tag only. v2 and latest are not moved until
-      # the pushed digest itself has passed the smoke test below.
-      - name: Push API image to its immutable tag
+      # Unique per workflow attempt; record and test the pushed digests.
+      - name: Push API image to its candidate tag
         if: github.ref == 'refs/heads/master'
         id: api
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           target: api-runtime
+          platforms: linux/amd64
+          build-args: |
+            KEYCAST_VERSION=${{ steps.version.outputs.version }}
+            KEYCAST_BUILD_REVISION=${{ github.sha }}
           push: true
           provenance: mode=max
           sbom: true
-          tags: ${{ env.API_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          tags: ${{ env.API_IMAGE }}:${{ steps.tags.outputs.candidate }}
 
-      - name: Push signer image to its immutable tag
+      - name: Push signer image to its candidate tag
         if: github.ref == 'refs/heads/master'
         id: signer
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           target: signer-runtime
+          platforms: linux/amd64
+          build-args: |
+            KEYCAST_VERSION=${{ steps.version.outputs.version }}
+            KEYCAST_BUILD_REVISION=${{ github.sha }}
           push: true
           provenance: mode=max
           sbom: true
-          tags: ${{ env.SIGNER_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          tags: ${{ env.SIGNER_IMAGE }}:${{ steps.tags.outputs.candidate }}
 
-      - name: Push web image to its immutable tag
+      - name: Push web image to its candidate tag
         if: github.ref == 'refs/heads/master'
         id: web
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: .
           target: web-runtime
+          platforms: linux/amd64
+          build-args: |
+            KEYCAST_VERSION=${{ steps.version.outputs.version }}
+            KEYCAST_BUILD_REVISION=${{ github.sha }}
           push: true
           provenance: mode=max
           sbom: true
-          tags: ${{ env.WEB_IMAGE }}:sha-${{ steps.tags.outputs.short_sha }}
+          tags: ${{ env.WEB_IMAGE }}:${{ steps.tags.outputs.candidate }}
 
       # Smoke the exact published artefacts, not a second local build.
       - name: Smoke test the published digests
@@ -154,24 +166,24 @@ jobs:
           subject-digest: ${{ steps.web.outputs.digest }}
           push-to-registry: true
 
-      # Last, so v2 and latest can never resolve to a digest whose attestation
-      # failed and which scripts/upgrade_preflight.sh would therefore reject.
-      # No rebuild: the artefact an operator pulls is byte-identical to the one
-      # smoke-tested above.
-      - name: Promote the tested and attested digests
+      - name: Assemble the verified candidate bundle
         if: github.ref == 'refs/heads/master'
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          set -euo pipefail
-          promote() {
-            local image="$1" digest="$2"
-            docker buildx imagetools create \
-              --tag "${image}:v2" \
-              --tag "${image}:latest" \
-              "${image}@${digest}"
-          }
-          promote "$API_IMAGE" "${{ steps.api.outputs.digest }}"
-          promote "$SIGNER_IMAGE" "${{ steps.signer.outputs.digest }}"
-          promote "$WEB_IMAGE" "${{ steps.web.outputs.digest }}"
+          python3 scripts/releases/release.py bundle --output release-candidate \
+            --api '${{ steps.api.outputs.digest }}' \
+            --signer '${{ steps.signer.outputs.digest }}' \
+            --web '${{ steps.web.outputs.digest }}'
+
+      - name: Preserve candidate for explicit release
+        if: github.ref == 'refs/heads/master'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.0
+        with:
+          name: release-candidate
+          path: release-candidate/*
+          if-no-files-found: error
+          retention-days: 90
 
       # The digests an operator copies into .env, with the verify command.
       - name: Report digests for pinning

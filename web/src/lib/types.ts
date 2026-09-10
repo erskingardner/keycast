@@ -94,6 +94,8 @@ export type InvitationCreationResponse = {
 };
 
 export type SignerStatus = {
+    software_version?: string;
+    build_revision?: string;
     resources: { inbox_records: number; inbox_bytes: number; pending_inputs: number; pending_responses: number; oldest_response_age_seconds: number; database_bytes: number; wal_bytes: number; last_backup_at: number | null; };
     ready: boolean;
     integrity_ok: boolean;

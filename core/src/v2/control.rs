@@ -117,6 +117,10 @@ pub struct GrantSummary {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct SignerStatus {
+    #[serde(default)]
+    pub software_version: String,
+    #[serde(default)]
+    pub build_revision: String,
     pub resources: ResourceStatus,
     pub ready: bool,
     pub quarantined_grants: usize,

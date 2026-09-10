@@ -1140,7 +1140,7 @@ dependencies = [
 
 [[package]]
 name = "keycast_api"
-version = "0.1.0"
+version = "2.0.0-rc.1"
 dependencies = [
  "axum",
  "keycast_core",
@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "keycast_core"
-version = "0.1.0"
+version = "2.0.0-rc.1"
 dependencies = [
  "aes-gcm",
  "base64 0.23.1",
@@ -1172,7 +1172,7 @@ dependencies = [
 
 [[package]]
 name = "keycast_signer"
-version = "0.1.0"
+version = "2.0.0-rc.1"
 dependencies = [
  "async-wsocket",
  "axum",

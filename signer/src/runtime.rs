@@ -67,6 +67,8 @@ impl RuntimeState {
         let (grants, sessions, invitations, relays, last_processed_at) =
             self.store.counts().await?;
         Ok(SignerStatus {
+            software_version: keycast_core::VERSION.to_string(),
+            build_revision: keycast_core::BUILD_REVISION.to_string(),
             resources: self.store.resources().await?,
             ready: self.ready.load(Ordering::Relaxed),
             quarantined_grants: self.quarantined_grants.load(Ordering::Relaxed),

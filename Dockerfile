@@ -1,6 +1,8 @@
 # syntax=docker/dockerfile:1.20.0@sha256:26147acbda4f14c5add9946e2fd2ed543fc402884fd75146bd342a7f6271dc1d
 
 FROM rust:1.96.0-slim-bookworm@sha256:4732ca96fd086cb9be682050c3f0176288eebaac2b80aa2bcefccfaf198e1950 AS rust-builder
+ARG KEYCAST_BUILD_REVISION=development
+ENV KEYCAST_BUILD_REVISION=${KEYCAST_BUILD_REVISION}
 WORKDIR /app
 COPY Cargo.toml Cargo.lock ./
 COPY api ./api
@@ -15,6 +17,8 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && install -Dm755 target/release/keycast_signer /out/keycast_signer
 
 FROM oven/bun:1.3.9@sha256:856da45d07aeb62eb38ea3e7f9e1794c0143a4ff63efb00e6c4491b627e2a521 AS web-builder
+ARG KEYCAST_BUILD_REVISION=development
+ENV KEYCAST_BUILD_REVISION=${KEYCAST_BUILD_REVISION}
 WORKDIR /app
 ENV CI=true NODE_ENV=production VITE_BUILD_MODE=production
 ARG VITE_DOMAIN
@@ -30,6 +34,10 @@ COPY web/package.json web/bun.lockb ./
 RUN bun install --production --frozen-lockfile
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS rust-runtime-base
+ARG KEYCAST_VERSION=development
+ARG KEYCAST_BUILD_REVISION=development
+LABEL org.opencontainers.image.version=${KEYCAST_VERSION} \
+      org.opencontainers.image.revision=${KEYCAST_BUILD_REVISION}
 LABEL org.opencontainers.image.source="https://github.com/marmot-protocol/keycast"
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ca-certificates \
@@ -58,6 +66,10 @@ HEALTHCHECK --interval=30s --timeout=6s --start-period=10s --retries=3 CMD ["/ap
 ENTRYPOINT ["/app/keycast_signer"]
 
 FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS web-runtime
+ARG KEYCAST_VERSION=development
+ARG KEYCAST_BUILD_REVISION=development
+LABEL org.opencontainers.image.version=${KEYCAST_VERSION} \
+      org.opencontainers.image.revision=${KEYCAST_BUILD_REVISION}
 LABEL org.opencontainers.image.source="https://github.com/marmot-protocol/keycast"
 RUN groupadd --system --gid 10001 keycast \
     && useradd --system --uid 10001 --gid keycast --home-dir /nonexistent --shell /usr/sbin/nologin keycast \

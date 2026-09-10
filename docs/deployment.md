@@ -64,28 +64,39 @@ administration of every team. See [Policies and access](policies-and-access.md).
 
 ## Choose images or a source build
 
-For published images, set each digest in `.env` before running preflight. The
-[image workflow](../.github/workflows/docker.yml) pushes commit-tagged images, smoke-tests those
-exact digests, and attests their provenance before promoting them to `v2` and `latest`. Tags are
-lookup aids; production Compose deploys the digests you select. Use the three images from the same
-reviewed build; its workflow summary records the digests.
+Official releases support **Linux AMD64 Docker Compose**. Choose a version from
+[GitHub Releases](https://github.com/marmot-protocol/keycast/releases), read its upgrade notes, and use
+all three digests from its `release.json`/`images.env`. Release candidates such as `v2.0.0-rc.1` are
+explicit prereleases; they never advance `v2` or `latest`. Those aliases may still refer to an older
+unnumbered build until the first stable numbered release.
 
-For example, inspect an image for a chosen commit with:
+Download into a fresh directory and verify the release assets:
 
 ```sh
-sudo docker buildx imagetools inspect ghcr.io/marmot-protocol/keycast-signer:sha-CHOSEN_COMMIT
+gh release download v2.0.0-rc.1 --repo marmot-protocol/keycast --dir /tmp/keycast-release
+gh release verify v2.0.0-rc.1 --repo marmot-protocol/keycast
+(cd /tmp/keycast-release && shasum -a 256 -c SHA256SUMS)
 ```
 
-Repeat for `keycast-api` and `keycast-web`, and record each manifest digest in its corresponding
-setting. Verify each image against this repository before trusting it:
+Copy the six image/digest entries from `images.env` into your instance's `.env`, preserving its domain,
+allowlists, and state path. The deployment archive contains matching production Compose and setup
+examples; alternatively check out the same version tag in the source repository. Never overwrite
+an existing root credential, database, or configuration with a fresh setup.
+
+The [image workflow](../.github/workflows/docker.yml) gates candidate publication on CI, smoke-tests
+the exact published digests, and attests them. The [release workflow](../.github/workflows/release.yml)
+verifies and tags those digests without rebuilding. Production Compose uses the recorded digests,
+not mutable tags. Verify each image against the source SHA recorded in `release.json`:
 
 ```sh
 gh attestation verify oci://ghcr.io/marmot-protocol/keycast-signer@sha256:CHOSEN_DIGEST \
-  --repo marmot-protocol/keycast
+  --repo marmot-protocol/keycast --source-digest COMMIT_SHA \
+  --source-ref refs/heads/master \
+  --signer-workflow marmot-protocol/keycast/.github/workflows/docker.yml
 ```
 
-Repeat for the API and web digests. Preflight performs these checks when `gh` is available and fails
-on verification errors; without `gh` it only warns, so install it to verify provenance. Do not copy image digests from a historical VM report as an implicit release selection.
+Repeat for API and web. Install GitHub CLI before preflight: verification errors fail preflight,
+but an absent CLI produces only a warning. Do not use historical VM reports to select a release.
 
 ```sh
 sudo scripts/upgrade_preflight.sh --fix-permissions

@@ -2,6 +2,9 @@
 members = ["api", "core", "signer"]
 resolver = "2"
 
+[workspace.package]
+version = "2.0.0-rc.1"
+
 [workspace.dependencies]
 base64 = "0.23.1"
 chrono = { version = "0.4.45", features = ["serde"] }

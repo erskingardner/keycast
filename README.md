@@ -22,6 +22,7 @@ and small teams running one instance on one host.
 | Run my own instance | [Deployment](docs/deployment.md) |
 | Understand permissions and access | [Policies and access](docs/policies-and-access.md) |
 | Understand how it works | [Architecture](docs/architecture.md) |
+| Choose a version | [Releases](https://github.com/marmot-protocol/keycast/releases) and [changelog](CHANGELOG.md) |
 | Work on the code | [Development and contribution](docs/development/README.md) |
 | Look up past decisions and test results | [Project history](docs/development/history/README.md) |
 
