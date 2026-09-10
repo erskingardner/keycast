@@ -65,7 +65,7 @@ ENV KEYCAST_ROOT_KEY_FILE=/run/secrets/keycast-root-key
 HEALTHCHECK --interval=30s --timeout=6s --start-period=10s --retries=3 CMD ["/app/keycast_signer", "healthcheck"]
 ENTRYPOINT ["/app/keycast_signer"]
 
-FROM node:24-bookworm-slim@sha256:ba849c60be29959425b8734d57b8b4b7d56f98edd9504c9af091d5281095a71e AS web-runtime
+FROM node:26-bookworm-slim@sha256:cd9f682fa2885cd1056e830424764158570061c59736a1da836bc3d73df095ae AS web-runtime
 ARG KEYCAST_VERSION=development
 ARG KEYCAST_BUILD_REVISION=development
 LABEL org.opencontainers.image.version=${KEYCAST_VERSION} \
