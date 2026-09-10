@@ -42,6 +42,47 @@ lifecycle below. All these rules are enforced in the signer, independently of UI
 
 *The demo team has two administrators and a member. [Compare the member view](screenshots.md#teams-and-roles).*
 
+## Choosing permissions
+
+Start with a use case in the policy editor. Focusing the search field opens the catalog; search
+by name, NIP, or event kind and check the use cases you need. Only selected use cases appear below
+the picker. Expand one to customize its individual capabilities.
+
+**Notes and replies**, **Long-form publishing**, **NIP-17 direct messages**, and **Marmot messaging**
+are separate choices. Long-form publishing includes encrypted NIP-37 drafts and revision history;
+the older kind 30024 draft format is an optional compatibility setting.
+
+![Searchable use-case picker in the policy editor](images/policy-picker.png)
+
+Permissions combine across selections. If a kind is included by two use cases, removing it from
+one leaves the other permission in place. The editor shows these overlaps and provides a
+**Disable everywhere** action. **Effective access** shows the combined result. You can also add
+an unlisted kind by number.
+
+Encryption and decryption are independent controls. Selected use cases suggest the operations
+and peer scopes they need, and the editor identifies those sources. You can narrow or disable a
+suggestion; the editor then points out which features may stop working. Removing a use case
+removes its suggestions, while explicitly chosen overrides and saved permissions remain.
+
+Policies save explicit permissions, not live references to templates. Reopening a policy shows
+its exact signing kinds under **Individual permissions**, along with its saved cryptographic
+scopes. Catalog updates cannot silently add access to an existing policy.
+
+### Direct messages, Marmot, and gift wraps
+
+NIP-17 direct messages use identity-signed seals (13), inbox relay metadata (10050), and NIP-44
+encryption/decryption. The app signs outer gift wraps (1059) with temporary keys. Inner message
+rumors are unsigned. The editor shows these layers under **Handled by the app** rather than
+adding unnecessary signing access to the hosted identity.
+
+Marmot messaging has its own preset for key packages (30443), account identity proofs (450),
+welcome seals (13), inbox relays (10050), and NIP-44 operations. Gift-wrapped welcomes use 1059;
+MLS encryption and temporary-key group messages (445) stay in the client. Optional controls
+cover legacy key packages, relay metadata, and push owner proofs. See the
+[catalog sources and signing boundaries](development/policy-catalog.md#messaging-layers).
+
+![NIP-17 and Marmot selections with gift-wrap details and separate encryption controls](images/policy-editor.png)
+
 ## Policy examples
 
 The UI provides controls for the policy fields; the JSON below also documents the contract for
@@ -90,9 +131,9 @@ Clients may request a narrower capability list when connecting. Such a list can 
 what the server policy permits; it cannot widen access. A missing client restriction still leaves
 the full server policy in force.
 
-![Private messages policy editor allowing kinds 14 and 1059 and separate NIP-44 encrypt and decrypt operations](images/policy-editor.png)
-
-*A separate messaging example allows kinds 14 and 1059 plus NIP-44 operations with any peer. Choose only the capabilities your client needs.*
+Self-only encryption/decryption covers any data encrypted to that identity, not just drafts or
+one application's data. Similarly, kind 31234 grants draft signing for any inner content kind;
+the policy does not inspect the encrypted draft to restrict it to articles.
 
 ## Expiry, updates, and revocation
 

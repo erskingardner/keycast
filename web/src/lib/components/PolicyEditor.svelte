@@ -5,9 +5,10 @@
     import type {
         Policy,
         PolicyDocument,
-        RecipientScope,
         TeamWithRelations,
     } from "$lib/types";
+    import PolicyPermissions from "./PolicyPermissions.svelte";
+    import { buildDocument, createEditorState } from "$lib/policy/editor";
     import { toast } from "svelte-hot-french-toast";
 
     let {
@@ -29,16 +30,7 @@
     );
 
     let policyName = $state("");
-    let allowSigning = $state(true);
-    let allowedKinds = $state("1, 7");
-    let nip04Encrypt = $state(false);
-    let nip04Decrypt = $state(false);
-    let nip44Encrypt = $state(false);
-    let nip44Decrypt = $state(false);
-    let nip04EncryptRecipient: RecipientScope = $state("any");
-    let nip04DecryptRecipient: RecipientScope = $state("any");
-    let nip44EncryptRecipient: RecipientScope = $state("any");
-    let nip44DecryptRecipient: RecipientScope = $state("any");
+    let permissions = $state(createEditorState());
     let errorMessage: string | null = $state(null);
     let isSaving = $state(false);
     let editLoadStarted = $state(false);
@@ -47,9 +39,13 @@
     $effect(() => {
         if (editLoadStarted) return;
         if (initialPolicy) {
-            loadPolicy(initialPolicy);
-            editLoaded = true;
             editLoadStarted = true;
+            try {
+                loadPolicy(initialPolicy);
+                editLoaded = true;
+            } catch (error) {
+                errorMessage = error instanceof Error ? error.message : String(error);
+            }
             return;
         }
         if (!isEditing) {
@@ -82,66 +78,23 @@
 
     function loadPolicy(policy: Policy) {
         policyName = policy.name;
-        const capabilities = policy.document.capabilities;
-        allowSigning = !!capabilities.sign_event;
-        allowedKinds = capabilities.sign_event?.allowed_kinds.join(", ") ?? "";
-        nip04Encrypt = !!capabilities.nip04_encrypt;
-        nip04Decrypt = !!capabilities.nip04_decrypt;
-        nip44Encrypt = !!capabilities.nip44_encrypt;
-        nip44Decrypt = !!capabilities.nip44_decrypt;
-        nip04EncryptRecipient = capabilities.nip04_encrypt?.recipient ?? "any";
-        nip04DecryptRecipient = capabilities.nip04_decrypt?.recipient ?? "any";
-        nip44EncryptRecipient = capabilities.nip44_encrypt?.recipient ?? "any";
-        nip44DecryptRecipient = capabilities.nip44_decrypt?.recipient ?? "any";
-    }
-
-    function parseKinds(): number[] | null {
-        const values = allowedKinds
-            .split(",")
-            .map((value) => value.trim())
-            .filter(Boolean);
-        const parsed = values.map(Number);
-        if (
-            parsed.length === 0 ||
-            parsed.some(
-                (value) =>
-                    !Number.isInteger(value) || value < 0 || value > 65535,
-            )
-        ) {
-            return null;
-        }
-        return [...new Set(parsed)];
+        permissions = createEditorState(policy.document);
     }
 
     async function savePolicy() {
-        if (!user?.pubkey || isSaving) return;
+        if (!user?.pubkey || isSaving || !editLoaded) return;
         errorMessage = null;
-        const kinds = allowSigning ? parseKinds() : [];
-        if (allowSigning && !kinds) {
-            errorMessage =
-                "Signing kinds must be a non-empty comma-separated list from 0 to 65535.";
-            return;
-        }
-
-        const capabilities: PolicyDocument["capabilities"] = {};
-        if (allowSigning) capabilities.sign_event = { allowed_kinds: kinds! };
-        if (nip04Encrypt)
-            capabilities.nip04_encrypt = { recipient: nip04EncryptRecipient };
-        if (nip04Decrypt)
-            capabilities.nip04_decrypt = { recipient: nip04DecryptRecipient };
-        if (nip44Encrypt)
-            capabilities.nip44_encrypt = { recipient: nip44EncryptRecipient };
-        if (nip44Decrypt)
-            capabilities.nip44_decrypt = { recipient: nip44DecryptRecipient };
-        if (Object.keys(capabilities).length === 0) {
-            errorMessage =
-                "Choose at least one capability. Empty policies are intentionally rejected.";
+        let document: PolicyDocument;
+        try {
+            document = buildDocument(permissions);
+        } catch (error) {
+            errorMessage = error instanceof Error ? error.message : String(error);
             return;
         }
 
         const request = {
             name: policyName,
-            document: { version: 1, capabilities } as PolicyDocument,
+            document,
         };
         isSaving = true;
         try {
@@ -208,69 +161,12 @@
         />
     </div>
 
-    <div class="card">
-        <label class="flex items-center gap-2"
-            ><input type="checkbox" bind:checked={allowSigning} /> Sign events</label
-        >
-        {#if allowSigning}
-            <div class="form-group mb-0!">
-                <label for="allowedKinds">Allowed event kinds</label>
-                <input
-                    id="allowedKinds"
-                    type="text"
-                    bind:value={allowedKinds}
-                    placeholder="1, 7"
-                />
-            </div>
-        {/if}
-    </div>
+    <fieldset disabled={isSaving || !editLoaded} class="min-w-0">
+        <legend class="sr-only">Policy permissions</legend>
+        <PolicyPermissions bind:value={permissions} />
+    </fieldset>
 
-    <div class="card">
-        <h2 class="font-semibold">Encryption and decryption</h2>
-        {#each [{ label: "NIP-44 encrypt", enabled: nip44Encrypt, recipient: nip44EncryptRecipient, key: "nip44Encrypt" }, { label: "NIP-44 decrypt", enabled: nip44Decrypt, recipient: nip44DecryptRecipient, key: "nip44Decrypt" }, { label: "NIP-04 encrypt (legacy)", enabled: nip04Encrypt, recipient: nip04EncryptRecipient, key: "nip04Encrypt" }, { label: "NIP-04 decrypt (legacy)", enabled: nip04Decrypt, recipient: nip04DecryptRecipient, key: "nip04Decrypt" }] as capability}
-            <div class="flex flex-col sm:flex-row sm:items-center gap-2">
-                <label class="flex items-center gap-2 grow">
-                    <input
-                        type="checkbox"
-                        checked={capability.enabled}
-                        onchange={(event) => {
-                            const checked = event.currentTarget.checked;
-                            if (capability.key === "nip44Encrypt")
-                                nip44Encrypt = checked;
-                            else if (capability.key === "nip44Decrypt")
-                                nip44Decrypt = checked;
-                            else if (capability.key === "nip04Encrypt")
-                                nip04Encrypt = checked;
-                            else nip04Decrypt = checked;
-                        }}
-                    />
-                    {capability.label}
-                </label>
-                {#if capability.enabled}
-                    <select
-                        value={capability.recipient}
-                        onchange={(event) => {
-                            const value = event.currentTarget
-                                .value as RecipientScope;
-                            if (capability.key === "nip44Encrypt")
-                                nip44EncryptRecipient = value;
-                            else if (capability.key === "nip44Decrypt")
-                                nip44DecryptRecipient = value;
-                            else if (capability.key === "nip04Encrypt")
-                                nip04EncryptRecipient = value;
-                            else nip04DecryptRecipient = value;
-                        }}
-                        aria-label={`${capability.label} counterparty`}
-                    >
-                        <option value="any">Any public key</option>
-                        <option value="self_only">Only the managed key</option>
-                    </select>
-                {/if}
-            </div>
-        {/each}
-    </div>
-
-    {#if errorMessage}<p class="input-error">{errorMessage}</p>{/if}
+    {#if errorMessage}<p class="input-error" role="alert">{errorMessage}</p>{/if}
     <button
         type="submit"
         class="button button-primary self-start"

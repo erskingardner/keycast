@@ -61,7 +61,9 @@ and how edits affect connected apps.
 
 | Policy list | Policy editor |
 |---|---|
-| [![Three demo policies for notes and reactions, private messages, and profile updates](images/policies.png)](images/policies.png) | [![Private messages editor with event kinds and separate NIP-44 encrypt and decrypt scopes](images/policy-editor.png)](images/policy-editor.png) |
+| [![Three demo policies for notes and reactions, private messages, and profile updates](images/policies.png)](images/policies.png) | [![NIP-17 and Marmot use cases with gift-wrap details and independent NIP-44 controls](images/policy-editor.png)](images/policy-editor.png) |
+
+![Searchable use-case dropdown; selected permissions remain below](images/policy-picker.png)
 | Use named policies for different purposes. | Grant only the operations a client needs; omitted capabilities are denied. |
 
 ## Instance operations
@@ -114,7 +116,7 @@ The same populated workspace in a mobile viewport.
 
 ## About these captures
 
-Captured on September 9, 2026 from source revision
+Except for the policy editor and picker refresh described below, captured on September 9, 2026 from source revision
 [`0aae2ee0d5fa5b54a76aeb5d2eaebb5ac906018f`](https://github.com/marmot-protocol/keycast/commit/0aae2ee0d5fa5b54a76aeb5d2eaebb5ac906018f),
 using the Rust signer and API with the SvelteKit development server. Chrome 152 was automated with
 Playwright at a 1440-pixel desktop width and a 390-pixel mobile width, with a 1.5 device scale.
@@ -128,10 +130,15 @@ sign-in used a test NIP-07 adapter with the demo signing keys held outside the b
 server authorization. Two NIP-46 clients paired through `nos.lol` and received verified event signatures.
 The signed sample notes were not published.
 
-The UI and status values were not mocked. The invitation screenshot masks the entire bunker URL,
+The September 9 UI and status values were not mocked. The invitation screenshot masks the entire bunker URL,
 and the import screenshot leaves the private-key field empty. Captures contain no private keys,
 root credentials, or usable invitations. This gallery illustrates these workflows; its counters
 are not an availability benchmark or a compatibility claim for named Nostr apps.
+
+The policy editor and picker images were refreshed on September 10, 2026 from the production
+SvelteKit build containing the searchable policy editor. They show the real form with local API
+test fixtures and a disposable external test signer, at a 1280-pixel desktop width. These captures
+illustrate permission selection; they do not demonstrate live relay or client compatibility.
 
 Avatars use [DiceBear's Notionists style](https://www.dicebear.com/styles/notionists/) by
 [Zoish](https://bio.link/heyzoish), available under

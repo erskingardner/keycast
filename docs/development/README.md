@@ -55,6 +55,9 @@ Every management access rule belongs in the signer; UI restrictions are not auth
 The API must not open SQLite or load the root credential. Preserve the explicit incompatibility
 with original-release storage and credentials.
 
+The [policy catalog maintenance guide](policy-catalog.md) records use-case mappings, NIP/Marmot
+source revisions, signing-key boundaries, and rules for updating presets without changing saved access.
+
 ## Validation
 
 Run from the repository root with the locked dependencies installed:
